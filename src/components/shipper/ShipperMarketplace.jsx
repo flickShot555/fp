@@ -1,7 +1,12 @@
-import React, { act, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import '../../styles/shipper/ShipperMarketplace.css';
+import { useAuth } from '../../contexts/AuthContext';
+import { API_URL } from '../../config';
+
+const MARKETPLACE_THRESHOLD = 60;
 
 export default function ShipperMarketplace() {
+  const { currentUser } = useAuth();
   const tabs = ['All', 'Public Listings', 'Carriers', 'Service Providers', 'Technology', 'Insurance', 'AI Matches'];
 
   const regions = ['All Regions', 'North', 'South', 'East', 'West', 'Midwest'];
@@ -13,6 +18,208 @@ export default function ShipperMarketplace() {
   const [selectedRegion, setSelectedRegion] = useState(regions[0]);
   const [selectedEquipment, setSelectedEquipment] = useState(equipment[0]);
   const [selectedRating, setSelectedRating] = useState(ratings[0]);
+
+  // Marketplace gating state
+  const [isMarketplaceReady, setIsMarketplaceReady] = useState(true);
+  const [onboardingScore, setOnboardingScore] = useState(100);
+  const [nextActions, setNextActions] = useState([]);
+  const [checkingAccess, setCheckingAccess] = useState(true);
+  const [consentEligible, setConsentEligible] = useState(true);
+  const [missingConsents, setMissingConsents] = useState([]);
+  const [gatingReason, setGatingReason] = useState('');
+
+  // Check onboarding status AND consent eligibility to gate marketplace
+  useEffect(() => {
+    const checkMarketplaceAccess = async () => {
+      if (!currentUser) {
+        setCheckingAccess(false);
+        return;
+      }
+
+      try {
+        const token = await currentUser.getIdToken();
+
+        // Check onboarding score
+        const onboardingResponse = await fetch(`${API_URL}/onboarding/coach-status`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        let scoreOk = true;
+        if (onboardingResponse.ok) {
+          const data = await onboardingResponse.json();
+          const score = data.total_score || 0;
+          setOnboardingScore(score);
+          scoreOk = score >= MARKETPLACE_THRESHOLD;
+          setNextActions(data.next_best_actions || []);
+        }
+
+        // Check consent eligibility
+        const consentResponse = await fetch(`${API_URL}/consents/marketplace-eligibility`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        let consentsOk = true;
+        if (consentResponse.ok) {
+          const consentData = await consentResponse.json();
+          consentsOk = consentData.eligible;
+          setConsentEligible(consentData.eligible);
+          setMissingConsents(consentData.missing_consents || []);
+        }
+
+        // Determine gating reason
+        if (!scoreOk && !consentsOk) {
+          setGatingReason('both');
+        } else if (!scoreOk) {
+          setGatingReason('score');
+        } else if (!consentsOk) {
+          setGatingReason('consent');
+        }
+
+        setIsMarketplaceReady(scoreOk && consentsOk);
+      } catch (error) {
+        console.error('Error checking marketplace access:', error);
+        setIsMarketplaceReady(true);
+      } finally {
+        setCheckingAccess(false);
+      }
+    };
+
+    checkMarketplaceAccess();
+  }, [currentUser]);
+
+  // Show loading state while checking access
+  if (checkingAccess) {
+    return (
+      <div className="marketplace-loading" style={{ padding: '40px', textAlign: 'center' }}>
+        <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '2rem', color: '#3b82f6' }}></i>
+        <p style={{ marginTop: '10px', color: '#64748b' }}>Checking marketplace access...</p>
+      </div>
+    );
+  }
+
+  // Show gating message if onboarding not complete or consents missing
+  if (!isMarketplaceReady) {
+    return (
+      <div className="marketplace-gated" style={{
+        padding: '60px 40px',
+        textAlign: 'center',
+        background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
+        borderRadius: '16px',
+        margin: '20px',
+        border: '1px solid #e2e8f0'
+      }}>
+        <div style={{
+          width: '80px',
+          height: '80px',
+          background: '#fef3c7',
+          borderRadius: '50%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          margin: '0 auto 20px'
+        }}>
+          <i className="fa-solid fa-lock" style={{ fontSize: '2rem', color: '#f59e0b' }}></i>
+        </div>
+
+        <h2 style={{ fontSize: '1.75rem', color: '#1e293b', marginBottom: '10px' }}>
+          Marketplace Access Locked
+        </h2>
+
+        <p style={{ color: '#64748b', marginBottom: '20px', maxWidth: '500px', margin: '0 auto 20px' }}>
+          {gatingReason === 'consent'
+            ? 'You must sign all required consent forms to access the marketplace.'
+            : gatingReason === 'both'
+            ? 'Complete your onboarding and sign required consent forms to unlock the marketplace.'
+            : `Complete your onboarding to unlock the marketplace. Score needed: ${MARKETPLACE_THRESHOLD}%`
+          }
+        </p>
+
+        {/* Show missing consents if applicable */}
+        {!consentEligible && missingConsents.length > 0 && (
+          <div style={{
+            background: '#fef2f2',
+            padding: '15px 20px',
+            borderRadius: '12px',
+            maxWidth: '400px',
+            margin: '0 auto 20px',
+            border: '1px solid #fecaca'
+          }}>
+            <div style={{ fontWeight: '600', color: '#dc2626', marginBottom: '10px' }}>
+              <i className="fa-solid fa-file-signature" style={{ marginRight: '8px' }}></i>
+              Missing Required Consents
+            </div>
+            <ul style={{ textAlign: 'left', margin: 0, paddingLeft: '20px', color: '#7f1d1d' }}>
+              {missingConsents.map((consent, idx) => (
+                <li key={idx} style={{ marginBottom: '5px' }}>
+                  {consent.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Show onboarding score if applicable */}
+        {(gatingReason === 'score' || gatingReason === 'both') && (
+        <div style={{
+          background: '#fff',
+          padding: '20px',
+          borderRadius: '12px',
+          maxWidth: '400px',
+          margin: '0 auto 30px',
+          boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px', marginBottom: '15px' }}>
+            <div style={{
+              width: '60px',
+              height: '60px',
+              borderRadius: '50%',
+              background: onboardingScore >= 50 ? '#fef3c7' : '#fee2e2',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '1.25rem',
+              fontWeight: 'bold',
+              color: onboardingScore >= 50 ? '#f59e0b' : '#ef4444'
+            }}>
+              {onboardingScore}%
+            </div>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontWeight: '600', color: '#1e293b' }}>Current Score</div>
+              <div style={{ color: '#64748b', fontSize: '0.875rem' }}>
+                Need {MARKETPLACE_THRESHOLD - onboardingScore}% more to unlock
+              </div>
+            </div>
+          </div>
+        </div>
+        )}
+
+        {nextActions.length > 0 && (gatingReason === 'score' || gatingReason === 'both') && (
+          <div style={{ textAlign: 'left', maxWidth: '400px', margin: '0 auto' }}>
+            <h4 style={{ color: '#1e293b', marginBottom: '10px' }}>Complete These Steps:</h4>
+            <ul style={{ listStyle: 'none', padding: 0 }}>
+              {nextActions.slice(0, 3).map((action, index) => (
+                <li key={index} style={{
+                  padding: '10px 15px',
+                  background: '#fff',
+                  borderRadius: '8px',
+                  marginBottom: '8px',
+                  border: '1px solid #e2e8f0'
+                }}>
+                  {action}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const allListings = [
     {

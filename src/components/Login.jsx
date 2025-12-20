@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 import '../styles/carrier/CarrierSignup.css';
 import '../styles/carrier/CarrierLogin.css';
 import carrier_ob_1 from '../assets/carrier_ob_1.png';
@@ -8,53 +11,124 @@ import carrier_ob_3 from '../assets/carrier_ob_3.jpg';
 import pattern_bg_signup from '../assets/pattern_bg_signup.svg';
 
 const Login = () => {
+  const { login } = useAuth(); 
+  const navigate = useNavigate();
+  
+  // Form State
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [role, setRole] = useState('carrier');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // Visuals (Carousel)
   const images = [carrier_ob_1, carrier_ob_2, carrier_ob_3];
   const [currentImg, setCurrentImg] = useState(0);
-  const navigate = useNavigate();
 
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentImg((p) => (p + 1) % images.length);
     }, 2500);
     return () => clearInterval(interval);
-  }, [images.length]);
+  }, []);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    // After login, go to the verification screen
-    navigate('/verify', { state: { role } });
-  };
+    setError('');
+    setLoading(true);
 
-  const signupLinkFor = (r) => {
-    navigate('/select-role');
+    try {
+      // 1. Authenticate & Check MFA Status
+      // The updated login() function now returns { user, mfaRequired, phone }
+      const res = await login(email, password);
+      
+      // 2. MFA Enforcement Logic
+      if (res.mfaRequired) {
+        // Redirect to Verification Page for SMS Code
+        navigate('/verify', { 
+            state: { 
+                phone: res.phone, 
+                fromLogin: true // Flag to tell verify page "This is a login MFA check"
+            } 
+        });
+        return; // Stop here, don't go to dashboard yet
+      }
+
+      // 3. If No MFA, Fetch Role & Redirect
+      const userDocRef = doc(db, "users", res.user.uid);
+      const userDoc = await getDoc(userDocRef);
+
+      if (!userDoc.exists()) {
+        throw new Error("User data not found. Please contact support.");
+      }
+
+      const userData = userDoc.data();
+      const role = userData.role || 'carrier';
+
+      // 4. Role-Based Redirect
+      if (role === 'admin') navigate('/admin-dashboard');
+      else if (role === 'driver') navigate('/driver-dashboard');
+      else if (role === 'shipper') navigate('/shipper-dashboard');
+      else navigate('/carrier-dashboard');
+
+    } catch (err) {
+      console.error(err);
+      setError("Failed to log in. Please check your email and password.");
+    }
+
+    setLoading(false);
   };
 
   return (
     <div className="carrier-signup-container carrier-login-page">
+      {/* Invisible Recaptcha for SMS (Required if MFA triggers) */}
+      <div id="recaptcha-container"></div>
+
+      {/* Left Side: Login Form */}
       <div className="carrier-signup-left">
         <img src={pattern_bg_signup} alt="Pattern" className="carrier-signup-pattern-bg" />
         <div className="carrier-signup-form-bg">
           <h1 className="carrier-signup-title">Log in to FreightPower AI</h1>
           <p className="carrier-signup-subtitle">Manage, move, and monitor freight smarter</p>
 
+          {error && (
+            <div style={{
+              backgroundColor: '#fee2e2', color: '#dc2626', padding: '10px', 
+              borderRadius: '8px', marginBottom: '16px', fontSize: '14px', border: '1px solid #fecaca'
+            }}>
+              {error}
+            </div>
+          )}
+
           <form className="carrier-signup-form" onSubmit={handleSubmit}>
+            {/* Email */}
             <div className="carrier-signup-field input-with-icon">
-              <label>Email Address *</label>
+              <label>Email Address</label>
               <div className="input-icon-wrap">
                 <i className="fa-solid fa-envelope" aria-hidden="true" />
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email Address" />
+                <input 
+                  type="email" 
+                  value={email} 
+                  onChange={(e) => setEmail(e.target.value)} 
+                  placeholder="email@company.com" 
+                  required
+                />
               </div>
             </div>
 
+            {/* Password */}
             <div className="carrier-signup-field input-with-icon">
-              <label>Password *</label>
+              <label>Password</label>
               <div className="input-icon-wrap">
                 <i className="fa-solid fa-lock" aria-hidden="true" />
-                <input id="password-field" type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" />
+                <input 
+                  id="password-field" 
+                  type={showPassword ? 'text' : 'password'} 
+                  value={password} 
+                  onChange={(e) => setPassword(e.target.value)} 
+                  placeholder="Enter your password" 
+                  required
+                />
                 <button
                   type="button"
                   className="password-toggle"
@@ -66,17 +140,20 @@ const Login = () => {
               </div>
             </div>
 
+            {/* Actions */}
             <div className="carrier-signup-bottom-actions">
               <div className="remember-row">
                 <label className="remember-ctrl"><input type="checkbox" /> Remember me</label>
-                <a href="#" className="forgot-link">Forgot Password?</a>
+                <Link to="/forgot-password" className="forgot-link">Forgot Password?</Link>
               </div>
 
               <div className="carrier-signup-login-actions">
-                <button type="submit" className="carrier-signup-btn">Login</button>
+                <button type="submit" className="carrier-signup-btn" disabled={loading}>
+                  {loading ? "Logging in..." : "Login"}
+                </button>
               </div>
 
-              <div className="divider"><span>Need help logging in? Ask our AI Assistant</span></div>
+              <div className="divider"><span>Or continue with</span></div>
 
               <button type="button" className="google-signin">
                 <i className="fa-brands fa-google google-icon" aria-hidden="true" />
@@ -84,13 +161,14 @@ const Login = () => {
               </button>
 
               <div className="carrier-signup-login-text">
-                Don't have an account? <button type="button" className="signup-link" onClick={() => signupLinkFor(role)}>Sign Up</button>
+                Don't have an account? <Link to="/select-role" className="signup-link">Sign Up</Link>
               </div>
             </div>
           </form>
         </div>
       </div>
 
+      {/* Right Side: Visuals */}
       <div className="carrier-signup-right-bg-simple">
         <img src={'/src/assets/blue_bg_signup.svg'} alt="Blue Background" className="carrier-signup-bg-svg" />
         <div className="carrier-signup-img-block">

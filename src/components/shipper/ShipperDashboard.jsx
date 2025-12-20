@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import { API_URL } from '../../config';
 import TrackingVisibility from './TrackingVisibility';
 import DocumentVault from './DocumentVault';
 import Finance from './Finance';
@@ -10,14 +12,48 @@ import ComplianceOverview from './ComplianceOverview';
 import AiHub from './AiHub';
 import ShipperAnalytics from './Analytics';
 import Settings from './Settings';
+// OnboardingCoach removed - compliance data now shown in Compliance & Safety page
 import logo from '/src/assets/logo.png';
 import resp_logo from '/src/assets/logo_1.png';
 
 export default function ShipperDashboard() {
+  const { currentUser } = useAuth();
   const [activeNav, setActiveNav] = useState('home');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarDark, setIsSidebarDark] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
+
+  // Onboarding data state
+  const [shipperProfile, setShipperProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+
+  // Fetch onboarding data on mount
+  useEffect(() => {
+    const fetchProfile = async () => {
+      if (!currentUser) {
+        setProfileLoading(false);
+        return;
+      }
+      try {
+        const token = await currentUser.getIdToken();
+        const response = await fetch(`${API_URL}/onboarding/data`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setShipperProfile(data);
+        }
+      } catch (error) {
+        console.error('Error fetching profile:', error);
+      } finally {
+        setProfileLoading(false);
+      }
+    };
+    fetchProfile();
+  }, [currentUser]);
 
   const navGroups = [
     {
@@ -77,6 +113,45 @@ export default function ShipperDashboard() {
             <button className="btn small ghost-cd">Track Shipments</button>
           </div>
         </header>
+
+        {/* Shipper Profile Card - Shows onboarding data */}
+        {!profileLoading && shipperProfile && shipperProfile.data && (
+          <section style={{ marginBottom: '20px' }}>
+            <div className="card" style={{ padding: '20px', background: '#f8fafc' }}>
+              <div className="card-header">
+                <h3><i className="fa-solid fa-building" style={{ marginRight: '8px' }}></i>Business Profile</h3>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginTop: '16px' }}>
+                {shipperProfile.data.businessName && (
+                  <div><strong>Business:</strong> {shipperProfile.data.businessName}</div>
+                )}
+                {shipperProfile.data.businessType && (
+                  <div><strong>Type:</strong> {shipperProfile.data.businessType}</div>
+                )}
+                {shipperProfile.data.contactFullName && (
+                  <div><strong>Contact:</strong> {shipperProfile.data.contactFullName}</div>
+                )}
+                {shipperProfile.data.contactEmail && (
+                  <div><strong>Email:</strong> {shipperProfile.data.contactEmail}</div>
+                )}
+                {shipperProfile.data.freightType && (
+                  <div><strong>Freight Type:</strong> {shipperProfile.data.freightType}</div>
+                )}
+                {shipperProfile.data.regionsOfOperation && (
+                  <div><strong>Regions:</strong> {shipperProfile.data.regionsOfOperation}</div>
+                )}
+              </div>
+              {!shipperProfile.onboarding_completed && (
+                <div style={{ marginTop: '16px', padding: '12px', background: '#fef3c7', borderRadius: '8px', color: '#92400e' }}>
+                  <i className="fa-solid fa-exclamation-triangle" style={{ marginRight: '8px' }}></i>
+                  Onboarding not complete. <a href="/shipper-onboarding" style={{ color: '#1d4ed8', textDecoration: 'underline' }}>Complete now</a>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* Onboarding Coach removed - compliance data now shown in Compliance & Safety page */}
 
         <section className="top-stats">
           <div className="card sd-small-card">

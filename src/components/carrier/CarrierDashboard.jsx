@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import { API_URL } from '../../config';
 import '../../styles/carrier/CarrierDashboard.css';
 import peopleIcon from '../../assets/ai_driver.svg';
 import MyLoads from './MyLoads';
@@ -14,22 +16,81 @@ import Messaging from './Messaging';
 import AlertsNotifications from './AlertsNotifications';
 import Analytics from './Analytics';
 import Calendar from './Calendar';
-import Settings from './Settings';  
+import Settings from './Settings';
 import HelpHub from './HelpHub';
+// OnboardingCoach removed - compliance data now shown in Compliance & Safety page
 import logo from '/src/assets/logo.png';
 import resp_logo from '/src/assets/logo_1.png';
 // Note: Font Awesome icons are used instead of custom SVGs for simplicity
 // icon images replaced by Font Awesome icons
 
 export default function CarrierDashboard() {
+  const { currentUser } = useAuth();
   // Placeholder data to match the design in the attached mock
   const activeLoads = { inProgress: 8, delivered: 24, completed: 156 };
   const driversCompliance = { active: 12, expiring: 4, alerts: 1 };
   const earnings = { week: '$24,580', month: '$98,450', factoring: '$15,200' };
   const [activeNav, setActiveNav] = useState('home');
+  const [activeMarketplaceSection, setActiveMarketplaceSection] = useState('loads');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarDark, setIsSidebarDark] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
+
+  // Onboarding data state
+  const [companyProfile, setCompanyProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [complianceScore, setComplianceScore] = useState(null);
+  const [dotNumber, setDotNumber] = useState('');
+  const [mcNumber, setMcNumber] = useState('');
+
+  // Fetch onboarding data on mount
+  useEffect(() => {
+    const fetchProfile = async () => {
+      if (!currentUser) {
+        setProfileLoading(false);
+        return;
+      }
+      try {
+        const token = await currentUser.getIdToken();
+        const response = await fetch(`${API_URL}/onboarding/data`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setCompanyProfile(data);
+          if (typeof data.onboarding_score !== 'undefined') {
+            setComplianceScore(data.onboarding_score);
+          }
+        }
+
+        // also fetch compliance status to show current compliance score
+        const complianceRes = await fetch(`${API_URL}/compliance/status`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (complianceRes.ok) {
+          const cData = await complianceRes.json();
+          if (typeof cData.compliance_score !== 'undefined') {
+            setComplianceScore(cData.compliance_score);
+          }
+          // Set DOT and MC numbers from the extracted document values
+          if (cData.dot_number) {
+            setDotNumber(cData.dot_number);
+          }
+          if (cData.mc_number) {
+            setMcNumber(cData.mc_number);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching profile:', error);
+      } finally {
+        setProfileLoading(false);
+      }
+    };
+    fetchProfile();
+  }, [currentUser]);
 
   const navGroups = [
     {
@@ -90,6 +151,50 @@ export default function CarrierDashboard() {
             <p className="fp-subtitle">Welcome back! Here's what's happening with your fleet today.</p>
           </div>
         </header>
+
+        {/* Company Profile Card - Shows onboarding data */}
+        {!profileLoading && companyProfile && companyProfile.data && (
+          <section style={{ marginBottom: '20px' }}>
+            <div className="card" style={{ padding: '20px', background: '#f8fafc' }}>
+              <div className="card-header">
+                <h3><i className="fa-solid fa-building" style={{ marginRight: '8px' }}></i>Company Profile</h3>
+                {complianceScore !== null && (
+                  <div className="pill" style={{ background:'#e0f2fe', color:'#075985', padding:'6px 10px', borderRadius:'999px', fontWeight:600 }}>
+                    Compliance Score: {Math.round(complianceScore)}%
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginTop: '16px' }}>
+                {companyProfile.data.companyName && (
+                  <div><strong>Company:</strong> {companyProfile.data.companyName}</div>
+                )}
+                {companyProfile.data.dotNumber && (
+                  <div><strong>DOT Number:</strong> {companyProfile.data.dotNumber}</div>
+                )}
+                {companyProfile.data.mcNumber && (
+                  <div><strong>MC Number:</strong> {companyProfile.data.mcNumber}</div>
+                )}
+                {companyProfile.data.contactEmail && (
+                  <div><strong>Contact:</strong> {companyProfile.data.contactEmail}</div>
+                )}
+                {companyProfile.data.fleetSize && (
+                  <div><strong>Fleet Size:</strong> {companyProfile.data.fleetSize} units</div>
+                )}
+                {companyProfile.data.homeTerminal && (
+                  <div><strong>Home Terminal:</strong> {companyProfile.data.homeTerminal}</div>
+                )}
+              </div>
+              {!companyProfile.onboarding_completed && (
+                <div style={{ marginTop: '16px', padding: '12px', background: '#fef3c7', borderRadius: '8px', color: '#92400e' }}>
+                  <i className="fa-solid fa-exclamation-triangle" style={{ marginRight: '8px' }}></i>
+                  Onboarding not complete. <a href="/carrier-onboarding" style={{ color: '#1d4ed8', textDecoration: 'underline' }}>Complete now</a>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* Onboarding Coach removed - compliance data now shown in Compliance & Safety page */}
 
         <section className="fp-grid">
           <div className="card stats-card">
@@ -173,7 +278,7 @@ export default function CarrierDashboard() {
           <div className="card recent-messages span-3">
             <div className="card-row">
               <h3>Recent Messages</h3>
-              <a className="view-all">View All</a>
+              <a className="view-all" onClick={() => setActiveNav('messaging')} style={{ cursor: 'pointer' }}>View All</a>
             </div>
             <ul className="recent-list">
               <li className="msg-item">
@@ -208,7 +313,13 @@ export default function CarrierDashboard() {
           <div className="card marketplace-snapshot span-3">
             <div className="card-row">
               <h3>Marketplace Snapshot</h3>
-              <button className="btn ghost-cd small">View All Marketplace</button>
+              <button 
+                className="btn ghost-cd small"
+                onClick={() => { setActiveMarketplaceSection('loads'); setActiveNav('marketplace'); }}
+                aria-label="View all marketplace listings"
+              >
+                View All Marketplace
+              </button>
             </div>
             <div className="market-grid">
               <div className="market-col loads">
@@ -240,7 +351,7 @@ export default function CarrierDashboard() {
                 <h4 className="col-title">Available Drivers</h4>
                 <div className="driver-count">5</div>
                 <div className="driver-sub muted">Drivers ready for hire</div>
-                <button className="btn small green-btn">View Candidates</button>
+                <button className="btn small green-btn" onClick={() => { setActiveMarketplaceSection('drivers'); setActiveNav('marketplace'); }}>View Candidates</button>
               </div>
 
               <div className="market-col offers">
@@ -260,7 +371,7 @@ export default function CarrierDashboard() {
           <div className="card notifications-card span-3">
             <div className="card-row">
               <h3>Latest Notifications</h3>
-              <a className="view-all">View All</a>
+              <a className="view-all" onClick={() => setActiveNav('alerts')} style={{ cursor: 'pointer' }}>View All</a>
             </div>
             <ul className="notifications-list">
               <li className="notification-item">
@@ -308,7 +419,7 @@ export default function CarrierDashboard() {
       case 'shippers':
         return <ShipperPartners />;
       case 'marketplace':
-        return <Marketplace />;
+        return <Marketplace activeSection={activeMarketplaceSection} setActiveSection={setActiveMarketplaceSection} />;
       case 'drivers':
         return <DriversAndDispatches />;
       case 'factoring':
@@ -371,9 +482,9 @@ export default function CarrierDashboard() {
                 </div>
                 {/* verified moved into sidebar header; topbar inline chips removed */}
                 <div className="ids">
-                  <span className="id-pair"><span className="id-label">DOT:</span> <span className="id-value">3456789</span></span>
+                  <span className="id-pair"><span className="id-label">DOT:</span> <span className="id-value">{dotNumber || 'N/A'}</span></span>
                   <span className="ids-sep">•</span>
-                  <span className="id-pair"><span className="id-label">MC:</span> <span className="id-value">MC-987654</span></span>
+                  <span className="id-pair"><span className="id-label">MC:</span> <span className="id-value">{mcNumber || 'N/A'}</span></span>
                 </div>
               </div>
             </div>
@@ -387,12 +498,30 @@ export default function CarrierDashboard() {
             </div>
             {/* mobile-only icons in the first row: visible on small screens */}
             <div className="icons-mobile">
-              <div className="notif">
+              <div
+                className="notif"
+                role="button"
+                aria-label="Open Alerts & Notifications"
+                onClick={() => { setActiveNav('alerts'); setIsSidebarOpen(false); }}
+              >
                 <i className="fa-regular fa-bell notif-icon" aria-hidden="true" />
                 <span className="notif-badge">3</span>
               </div>
-              <i className="fa-solid fa-robot bot-icon" aria-hidden="true" />
-              <img src="https://randomuser.me/api/portraits/men/75.jpg" alt="avatar" className="avatar-img"/>
+              <i
+                className="fa-solid fa-robot bot-icon"
+                aria-hidden="true"
+                role="button"
+                aria-label="Open Help Hub"
+                onClick={() => { setActiveNav('help'); setIsSidebarOpen(false); }}
+              />
+              <img
+                src="https://randomuser.me/api/portraits/men/75.jpg"
+                alt="avatar"
+                className="avatar-img"
+                role="button"
+                aria-label="Open Settings"
+                onClick={() => { setActiveNav('settings'); setIsSidebarOpen(false); }}
+              />
             </div>
           </div>
         </div>
@@ -415,12 +544,30 @@ export default function CarrierDashboard() {
           <div className="topbar-right">
             <div className="icons">
               <span className="lang"><i className="fa-solid fa-globe"/> EN</span>
-              <div className="notif">
+              <div
+                className="notif"
+                role="button"
+                aria-label="Open Alerts & Notifications"
+                onClick={() => { setActiveNav('alerts'); setIsSidebarOpen(false); }}
+              >
                 <i className="fa-regular fa-bell notif-icon" aria-hidden="true" />
                 <span className="notif-badge">3</span>
               </div>
-              <i className="fa-solid fa-robot bot-icon" aria-hidden="true" />
-              <img src="https://randomuser.me/api/portraits/men/75.jpg" alt="avatar" className="avatar-img"/>
+              <i
+                className="fa-solid fa-robot bot-icon"
+                aria-hidden="true"
+                role="button"
+                aria-label="Open Help Hub"
+                onClick={() => { setActiveNav('help'); setIsSidebarOpen(false); }}
+              />
+              <img
+                src="https://randomuser.me/api/portraits/men/75.jpg"
+                alt="avatar"
+                className="avatar-img"
+                role="button"
+                aria-label="Open Settings"
+                onClick={() => { setActiveNav('settings'); setIsSidebarOpen(false); }}
+              />
             </div>
           </div>
         </div>
@@ -434,8 +581,8 @@ export default function CarrierDashboard() {
           </div>
           {/* DOT / MC line for mobile drawer */}
           <div className="ids mobile-ids">
-            <div className="mobile-id-line"><span className="id-pair"><span className="id-label">DOT:</span> <span className="id-value">3456789</span></span></div>
-            <div className="mobile-id-line"><span className="id-pair"><span className="id-label">MC:</span> <span className="id-value">MC-987654</span></span></div>
+            <div className="mobile-id-line"><span className="id-pair"><span className="id-label">DOT:</span> <span className="id-value">{dotNumber || 'N/A'}</span></span></div>
+            <div className="mobile-id-line"><span className="id-pair"><span className="id-label">MC:</span> <span className="id-value">{mcNumber || 'N/A'}</span></span></div>
           </div>
           <div className="chips sidebar-chips">
             <span className="chip-cd success">DOT Active</span>
@@ -458,7 +605,13 @@ export default function CarrierDashboard() {
                   <li
                     className={`nav-item ${activeNav === it.key ? 'active' : ''}`}
                     key={it.key}
-                    onClick={() => { setActiveNav(it.key); if (isSidebarOpen) setIsSidebarOpen(false); }}
+                    onClick={() => { 
+                      setActiveNav(it.key);
+                      if (it.key === 'marketplace') {
+                        setActiveMarketplaceSection('loads');
+                      }
+                      if (isSidebarOpen) setIsSidebarOpen(false); 
+                    }}
                     role="button"
                     tabIndex={0}
                   >

@@ -1,26 +1,206 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import { API_URL } from '../../config';
 import '../../styles/carrier/ComplianceSafety.css';
 
 export default function ComplianceSafety() {
+  const { currentUser } = useAuth();
   const [selectedTask, setSelectedTask] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState('');
+  const [syncSuccess, setSyncSuccess] = useState('');
+  const [lastSyncTime, setLastSyncTime] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [analyzingAI, setAnalyzingAI] = useState(false);
 
-  // Mock data based on the screenshot
-  const complianceData = {
-    dotNumber: '3456789',
-    mcNumber: '789012',
+  // Compliance data from API
+  const [complianceData, setComplianceData] = useState({
+    dotNumber: '',
+    mcNumber: '',
     authorityType: 'Common Carrier',
-    dotStatus: 'Active',
-    lastFmsaSync: 'Today, 6:00 AM',
-    nextReview: 'March 2025',
-    auditTrial: 'View History'
+    dotStatus: 'Pending',
+    lastFmsaSync: 'Never synced',
+    nextReview: 'Pending',
+    auditTrial: 'View History',
+    insuranceStatus: 'Unknown',
+    insuranceExpiry: null,
+    safetyRating: 'N/A'
+  });
+
+  const [complianceStatus, setComplianceStatus] = useState({
+    score: 0,
+    breakdown: {},
+    status_color: 'Red',
+    documents: [],
+    issues: [],
+    warnings: [],
+    recommendations: []
+  });
+
+  const [complianceTasks, setComplianceTasks] = useState([]);
+
+  // Fetch compliance data from API
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const fetchComplianceData = async () => {
+      setLoading(true);
+      try {
+        const token = await currentUser.getIdToken();
+
+        // Fetch compliance status
+        const statusRes = await fetch(`${API_URL}/compliance/status`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (statusRes.ok) {
+          const data = await statusRes.json();
+          setComplianceStatus({
+            score: data.compliance_score || 0,
+            breakdown: data.score_breakdown || {},
+            status_color: data.status_color || 'Red',
+            documents: data.documents || [],
+            issues: data.issues || [],
+            warnings: data.warnings || [],
+            recommendations: data.recommendations || []
+          });
+
+          // Set role-specific data - use extracted DOT/MC from top-level (from documents)
+          setComplianceData(prev => ({
+            ...prev,
+            dotNumber: data.dot_number || prev.dotNumber,
+            mcNumber: data.mc_number || prev.mcNumber,
+            dotStatus: data.role_data?.fmcsa_verified ? 'Active' : 'Pending',
+            insuranceStatus: data.role_data?.insurance_status || 'Unknown',
+            insuranceExpiry: data.role_data?.insurance_expiry,
+            safetyRating: data.role_data?.safety_rating || 'N/A'
+          }));
+
+          // Get FMCSA live info once we have DOT/MC (use extracted values)
+          const dot = data.dot_number || complianceData.dotNumber;
+          const mc = data.mc_number || complianceData.mcNumber;
+          if (dot || mc) {
+            await fetchFmcsaInfo(token, dot, mc);
+          }
+        }
+
+        // Fetch compliance tasks
+        const tasksRes = await fetch(`${API_URL}/compliance/tasks`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (tasksRes.ok) {
+          const tasks = await tasksRes.json();
+          setComplianceTasks(tasks);
+        }
+      } catch (error) {
+        console.error('Error fetching compliance data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchComplianceData();
+  }, [currentUser]);
+
+  // AI Analysis function
+  const runAIAnalysis = async () => {
+    if (!currentUser) return;
+    setAnalyzingAI(true);
+
+    try {
+      const token = await currentUser.getIdToken();
+      const res = await fetch(`${API_URL}/compliance/ai-analyze`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setAiAnalysis(data.analysis);
+      }
+    } catch (error) {
+      console.error('AI analysis error:', error);
+    } finally {
+      setAnalyzingAI(false);
+    }
   };
 
-  const aiScore = 82;
+  // Function to sync FMCSA data
+  const fetchFmcsaInfo = async (token, dotNumber, mcNumber) => {
+    if (!dotNumber && !mcNumber) return;
+    
+    try {
+      const response = await fetch(`${API_URL}/fmcsa/verify`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          usdot: dotNumber,
+          mc_number: mcNumber
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const now = new Date();
+        setLastSyncTime(now);
+        setComplianceData(prev => ({
+          ...prev,
+          dotStatus: data.result === 'Verified' ? 'Active' : data.result || prev.dotStatus,
+          authorityType: data.status || prev.authorityType,
+          safetyRating: data.safety_rating || prev.safetyRating,
+          mcNumber: data.mc_number || mcNumber || prev.mcNumber,
+          dotNumber: data.usdot || dotNumber || prev.dotNumber,
+          lastFmsaSync: `Today, ${now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`
+        }));
+        setSyncSuccess('FMCSA data synced successfully!');
+        setTimeout(() => setSyncSuccess(''), 5000);
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        console.warn('FMCSA sync warning:', errorData.detail || 'Unable to sync FMCSA data');
+        // Don't throw - FMCSA sync is optional, continue with what we have
+      }
+    } catch (error) {
+      console.warn('FMCSA fetch error (non-critical):', error);
+      // Don't throw - FMCSA sync is optional, continue with what we have
+    }
+  };
+    
+
+
+  const handleFmcsaSync = async () => {
+    if (!currentUser) return;
+    setSyncing(true);
+    setSyncError('');
+    setSyncSuccess('');
+    try {
+      const token = await currentUser.getIdToken();
+      await fetchFmcsaInfo(token, complianceData.dotNumber, complianceData.mcNumber);
+    } catch (error) {
+      console.error('FMCSA sync error:', error);
+      const now = new Date();
+      setComplianceData(prev => ({
+        ...prev,
+        lastFmsaSync: `Failed at ${now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`
+      }));
+      setSyncError('Failed to sync FMCSA data. Please check your DOT/MC numbers and try again.');
+      setTimeout(() => setSyncError(''), 5000);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // Use API data for AI score
+  const aiScore = Math.round(complianceStatus.score);
   const scoreBreakdown = {
-    fmsaData: 85,
-    documentStatus: 78,
-    driverQualification: 90,
-    safetyHistory: 88
+    documents: complianceStatus.breakdown.document_completeness || complianceStatus.breakdown.documents || 0,
+    verification: complianceStatus.breakdown.data_accuracy || complianceStatus.breakdown.verification || 0,
+    expiry_status: complianceStatus.breakdown.regulatory_compliance || complianceStatus.breakdown.expiry_status || 0,
+    completeness: complianceStatus.breakdown.document_completeness || complianceStatus.breakdown.completeness || 0
   };
 
   const basicScores = [
@@ -68,39 +248,32 @@ export default function ComplianceSafety() {
     }
   ];
 
-  const complianceTasks = [
+  // Default tasks if API returns empty
+  const defaultTasks = [
     {
-      id: 1,
-      type: 'critical',
-      title: 'Renew General Liability Insurance',
-      description: 'Expires in 30 days - March 15, 2025',
-      actions: ['Upload Doc', 'Assign'],
-      icon: 'fa-file-shield'
-    },
-    {
-      id: 2,
-      type: 'warning',
-      title: 'Driver CDL Renewal - John Smith',
-      description: 'Expires in 45 days - April 01, 2025',
-      actions: ['Notify Driver', 'Mark Complete'],
-      icon: 'fa-id-card'
-    },
-    {
-      id: 3,
-      type: 'critical',
-      title: 'Vehicle Inspection Overdue - Unit #1234',
-      description: 'Annual inspection was due February 28, 2025',
-      actions: ['Schedule', 'Assign'],
-      icon: 'fa-clipboard-check'
+      id: 'default-1',
+      type: 'info',
+      title: 'Complete Onboarding',
+      description: 'Upload required documents to improve compliance score',
+      actions: ['Go to Onboarding'],
+      icon: 'fa-clipboard-list'
     }
   ];
 
-  const complianceDocuments = [
-    { name: 'General Liability', status: 'valid', expires: '03/15/2025' },
-    { name: 'Operating Authority', status: 'active' },
-    { name: 'ELD Certificate', status: 'warning', expires: '04/01/2025' },
-    { name: 'Drug Testing Policy', status: 'missing' }
-  ];
+  // Use API tasks or defaults
+  const displayTasks = complianceTasks.length > 0 ? complianceTasks : defaultTasks;
+
+  // Transform API documents to display format
+  const complianceDocuments = (complianceStatus.documents || []).map(doc => {
+    // Handle different possible field names from API
+    const docType = doc.type || doc.filename || doc.id || 'Document';
+    const displayName = String(docType).replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    return {
+      name: displayName,
+      status: doc.is_expired ? 'missing' : doc.is_expiring_soon ? 'warning' : doc.status === 'valid' ? 'valid' : 'active',
+      expires: doc.expiry_date ? new Date(doc.expiry_date).toLocaleDateString() : null
+    };
+  });
 
   const getStatusClass = (status) => {
     switch (status) {
@@ -125,12 +298,58 @@ export default function ComplianceSafety() {
             <i className="fa-solid fa-camera" style={{color: 'white'}}></i>
             Available Snapshots
           </button>
-          <button className="btn small-cd">
-            <i className="fa-solid fa-sync" style={{color: 'white'}}></i>
-            Sync FMCSA
+          <button className="btn small-cd" onClick={handleFmcsaSync} disabled={syncing}>
+            <i className={`fa-solid fa-sync ${syncing ? 'fa-spin' : ''}`} style={{color: 'white'}}></i>
+            {syncing ? 'Syncing...' : 'Run Nightly Sync'}
           </button>
         </div>
       </header>
+
+      {/* Loading State */}
+      {loading && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: '40px',
+          color: '#6366f1'
+        }}>
+          <i className="fa-solid fa-spinner fa-spin" style={{fontSize: '2rem', marginRight: 12}}></i>
+          <span>Loading compliance data...</span>
+        </div>
+      )}
+
+      {/* Sync Status Messages */}
+      {syncSuccess && (
+        <div className="sync-message success" style={{
+          background: '#d4edda',
+          color: '#155724',
+          padding: '10px 15px',
+          borderRadius: '8px',
+          margin: '0 0 15px 0',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px'
+        }}>
+          <i className="fa-solid fa-check-circle"></i>
+          {syncSuccess}
+        </div>
+      )}
+      {syncError && (
+        <div className="sync-message error" style={{
+          background: '#f8d7da',
+          color: '#721c24',
+          padding: '10px 15px',
+          borderRadius: '8px',
+          margin: '0 0 15px 0',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px'
+        }}>
+          <i className="fa-solid fa-exclamation-circle"></i>
+          {syncError}
+        </div>
+      )}
 
       {/* Main Content Grid */}
       <div className="compliance-grid">
@@ -218,7 +437,7 @@ export default function ComplianceSafety() {
             </div>
             
             <div className="tasks-list">
-              {complianceTasks.map((task) => (
+              {displayTasks.map((task) => (
                 <div key={task.id} className={`task-item ${task.type}`}>
                   <div className="task-icon">
                     <i className={`fa-solid ${task.icon}`}></i>
@@ -262,36 +481,73 @@ export default function ComplianceSafety() {
                     cy="50"
                     r="45"
                     fill="none"
-                    stroke="#22c55e"
+                    stroke={aiScore >= 80 ? '#22c55e' : aiScore >= 50 ? '#f59e0b' : '#dc2626'}
                     strokeWidth="8"
                     strokeDasharray={`${aiScore * 2.827} 282.7`}
                     strokeLinecap="round"
                     transform="rotate(-90 50 50)"
                   />
                 </svg>
-                <div className="score-number">{aiScore}</div>
+                <div className="score-number" style={{color: aiScore >= 80 ? '#22c55e' : aiScore >= 50 ? '#f59e0b' : '#dc2626'}}>{aiScore}</div>
                 <div className="score-label">Score</div>
               </div>
             </div>
             <div className="score-breakdown">
               <div className="breakdown-item">
-                <span className="breakdown-label">FMCSA Data</span>
-                <span className="breakdown-value">{scoreBreakdown.fmsaData}%</span>
+                <span className="breakdown-label">Document Completeness</span>
+                <span className="breakdown-value">{Math.round(scoreBreakdown.documents)}%</span>
               </div>
               <div className="breakdown-item">
-                <span className="breakdown-label">Document Status</span>
-                <span className="breakdown-value">{scoreBreakdown.documentStatus}%</span>
+                <span className="breakdown-label">Data Accuracy</span>
+                <span className="breakdown-value">{Math.round(scoreBreakdown.verification)}%</span>
               </div>
               <div className="breakdown-item">
-                <span className="breakdown-label">Driver Qualification</span>
-                <span className="breakdown-value">{scoreBreakdown.driverQualification}%</span>
+                <span className="breakdown-label">Regulatory Compliance</span>
+                <span className="breakdown-value">{Math.round(scoreBreakdown.expiry_status)}%</span>
               </div>
               <div className="breakdown-item">
-                <span className="breakdown-label">Safety History</span>
-                <span className="breakdown-value">{scoreBreakdown.safetyHistory}%</span>
+                <span className="breakdown-label">Overall Completeness</span>
+                <span className="breakdown-value">{Math.round(scoreBreakdown.completeness)}%</span>
               </div>
             </div>
-            <button className="btn small-cd" style={{width: '100%'}}>View Score Breakdown</button>
+            <button className="btn small-cd" style={{width: '100%'}} onClick={runAIAnalysis} disabled={analyzingAI}>
+              <i className={`fa-solid fa-robot ${analyzingAI ? 'fa-spin' : ''}`} style={{marginRight: 8}}></i>
+              {analyzingAI ? 'Analyzing...' : 'Get AI Analysis'}
+            </button>
+
+            {/* AI Analysis Results */}
+            {aiAnalysis && (
+              <div style={{marginTop: 16, padding: 12, background: '#f8fafc', borderRadius: 8}}>
+                <div style={{fontWeight: 700, marginBottom: 8, color: '#1e293b'}}>
+                  <i className="fa-solid fa-brain" style={{marginRight: 8, color: '#6366f1'}}></i>
+                  AI Analysis
+                </div>
+                <p style={{fontSize: '0.9rem', color: '#475569', marginBottom: 8}}>{aiAnalysis.summary}</p>
+                <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8}}>
+                  <span style={{fontSize: '0.85rem', fontWeight: 600}}>Risk Level:</span>
+                  <span style={{
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    background: aiAnalysis.risk_level === 'low' ? '#dcfce7' : aiAnalysis.risk_level === 'high' ? '#fee2e2' : '#fef3c7',
+                    color: aiAnalysis.risk_level === 'low' ? '#166534' : aiAnalysis.risk_level === 'high' ? '#991b1b' : '#92400e'
+                  }}>
+                    {aiAnalysis.risk_level?.toUpperCase()}
+                  </span>
+                </div>
+                {aiAnalysis.immediate_actions?.length > 0 && (
+                  <div style={{marginTop: 8}}>
+                    <div style={{fontSize: '0.85rem', fontWeight: 600, marginBottom: 4}}>Immediate Actions:</div>
+                    <ul style={{margin: 0, paddingLeft: 20, fontSize: '0.85rem', color: '#64748b'}}>
+                      {aiAnalysis.immediate_actions.slice(0, 3).map((action, i) => (
+                        <li key={i}>{typeof action === 'string' ? action : action.title}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Compliance Documents */}

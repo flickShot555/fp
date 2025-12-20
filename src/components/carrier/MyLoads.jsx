@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import '../../styles/carrier/MyLoads.css';
+import AddLoads from './AddLoads';
 
 const sampleData = {
   tendered: [
@@ -82,6 +83,8 @@ function Column({ title, items }) {
 }
 
 export default function MyLoads() {
+  const [showAddLoads, setShowAddLoads] = useState(false);
+
   return (
     <div className="myloads-root">
       <div className="ml-header">
@@ -95,7 +98,7 @@ export default function MyLoads() {
             <button className="btn ghost small">List</button>
             <button className="btn ghost small">Map</button> */}
             <input className="ml-search" placeholder="Search loads..." />
-            <button className="btn small-cd">+ Add Load</button>
+            <button className="btn small-cd" onClick={() => setShowAddLoads(true)}>+ Add Load</button>
           </div>
         </div>
       </div>
@@ -109,6 +112,8 @@ export default function MyLoads() {
         <Column title="Invoiced" items={sampleData.invoiced} />
         <Column title="Settled" items={sampleData.settled} />
       </div>
+
+      {showAddLoads && <AddLoads onClose={() => setShowAddLoads(false)} />}
     </div>
   );
 }

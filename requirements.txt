@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-multipart
+groq
+PyMuPDF
+Pillow
+langchain-text-splitters
+fastembed
+onnxruntime
+numpy
+python-dateutil
+httpx
+apscheduler

@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../../contexts/AuthContext'
+import { API_URL } from '../../config'
 import carrier_ob_1 from '../../assets/carrier_ob_1.png'
 import carrier_ob_2 from '../../assets/carrier_ob_2.jpg'
 import carrier_ob_3 from '../../assets/carrier_ob_3.jpg'
@@ -10,11 +12,15 @@ import verification from '../../assets/verification_bg.svg'
 import botpic from '../../assets/chatbot.svg'
 
 export default function ShipperOnboarding(){
+  const navigate = useNavigate()
+  const { currentUser } = useAuth()
   const images = [carrier_ob_1, carrier_ob_2, carrier_ob_3]
   const [currentImg, setCurrentImg] = useState(0)
   const [isChatOpen, setIsChatOpen] = useState(false)
-  const [currentStep, setCurrentStep] = useState(1) // 1..5
-  const steps = ['Business Info','Contact Person','Upload Documents','Prefreneces','Final Review']
+  const [currentStep, setCurrentStep] = useState(1)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const steps = ['Business Info','Contact Person','Upload Documents','Preferences','Final Review']
 
   useEffect(()=>{
     const t = setInterval(()=> setCurrentImg(p => (p+1)%images.length), 2500)
@@ -35,28 +41,82 @@ export default function ShipperOnboarding(){
     bmc: null,
     coi: null
   })
+  const [uploading, setUploading] = useState({})
+  const [uploadError, setUploadError] = useState('')
+  const [uploadSuccess, setUploadSuccess] = useState('')
+
   const w9Ref = useRef()
   const proofRef = useRef()
   const bmcRef = useRef()
   const coiRef = useRef()
 
-  function onFileSelect(field, file){
-    setUploads(u => ({ ...u, [field]: file }))
+  // Handle file upload to API
+  const handleFileUpload = async (field, file, documentType) => {
+    if (!file) return
+
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png']
+    if (!allowedTypes.includes(file.type)) {
+      setUploadError('Only PDF, JPG, and PNG files are allowed')
+      setTimeout(() => setUploadError(''), 5000)
+      return
+    }
+
+    if (file.size > 25 * 1024 * 1024) {
+      setUploadError('File size must be less than 25MB')
+      setTimeout(() => setUploadError(''), 5000)
+      return
+    }
+
+    setUploading(prev => ({ ...prev, [field]: true }))
+    setUploadError('')
+
+    try {
+      const token = currentUser ? await currentUser.getIdToken() : null
+      const formDataUpload = new FormData()
+      formDataUpload.append('file', file)
+      formDataUpload.append('document_type', documentType)
+
+      const headers = {}
+      if (token) headers['Authorization'] = `Bearer ${token}`
+
+      const response = await fetch(`${API_URL}/documents/upload`, {
+        method: 'POST',
+        headers,
+        body: formDataUpload
+      })
+
+      const result = await response.json()
+
+      if (response.ok) {
+        setUploads(prev => ({ ...prev, [field]: { file, response: result } }))
+        setUploadSuccess(`${file.name} uploaded successfully!`)
+        setTimeout(() => setUploadSuccess(''), 5000)
+      } else {
+        setUploadError(result.detail || 'Failed to upload document')
+        setTimeout(() => setUploadError(''), 5000)
+      }
+    } catch (error) {
+      console.error('Upload error:', error)
+      setUploadError('Failed to upload document. Please try again.')
+      setTimeout(() => setUploadError(''), 5000)
+    } finally {
+      setUploading(prev => ({ ...prev, [field]: false }))
+    }
   }
 
-  function handleFileInput(field, e){
+  function handleFileInput(field, documentType, e){
     const f = e.target.files && e.target.files[0]
-    if(f) onFileSelect(field, f)
+    if(f) handleFileUpload(field, f, documentType)
   }
 
   function handleRemove(field){
     setUploads(u => ({ ...u, [field]: null }))
   }
 
-  function handleDrop(field, e){
+  function handleDrop(field, documentType, e){
     e.preventDefault()
     const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]
-    if(f) onFileSelect(field, f)
+    if(f) handleFileUpload(field, f, documentType)
   }
 
   function preventDefault(e){ e.preventDefault(); e.stopPropagation() }
@@ -93,7 +153,47 @@ export default function ShipperOnboarding(){
     setShipperData(s => ({ ...s, [key]: value }))
   }
 
-  const navigate = useNavigate()
+  const handleFinish = async () => {
+    if (!currentUser) {
+      navigate('/shipper-dashboard')
+      return
+    }
+
+    setSaving(true)
+    setSaveError('')
+
+    try {
+      const token = await currentUser.getIdToken()
+      const allData = {
+        ...shipperData,
+        ...preferences,
+      }
+
+      const response = await fetch(`${API_URL}/onboarding/save`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          role: 'shipper',
+          data: allData
+        })
+      })
+
+      if (response.ok) {
+        navigate('/shipper-dashboard')
+      } else {
+        const data = await response.json()
+        setSaveError(data.detail || 'Failed to save onboarding data')
+      }
+    } catch (error) {
+      console.error('Error saving onboarding:', error)
+      setSaveError('Failed to save. Please try again.')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
   <div className="onboarding-container">
@@ -187,117 +287,114 @@ export default function ShipperOnboarding(){
 
             {currentStep === 3 && (
               <>
+                {uploadError && (
+                  <div style={{padding:'12px',background:'#fee2e2',color:'#dc2626',borderRadius:'8px',marginBottom:'16px'}}>
+                    {uploadError}
+                  </div>
+                )}
+                {uploadSuccess && (
+                  <div style={{padding:'12px',background:'#dcfce7',color:'#16a34a',borderRadius:'8px',marginBottom:'16px'}}>
+                    {uploadSuccess}
+                  </div>
+                )}
+
                 <label>W-9 Form (Required)</label>
-                <div className="upload-box" onDrop={(e)=>handleDrop('w9', e)} onDragOver={preventDefault} onDragEnter={preventDefault} onDragLeave={preventDefault} style={{display:'flex',flexDirection:'column',gap:8}}>
-                  {uploads.w9 ? (
+                <input ref={w9Ref} type="file" style={{display:'none'}} accept=".pdf,.jpg,.jpeg,.png" onChange={(e)=>handleFileInput('w9', 'w9', e)} />
+                <div className="upload-box" onDrop={(e)=>handleDrop('w9', 'w9', e)} onDragOver={preventDefault} onDragEnter={preventDefault} style={{display:'flex',flexDirection:'column',gap:8,cursor:'pointer'}} onClick={() => !uploads.w9 && w9Ref.current?.click()}>
+                  {uploading.w9 ? (
+                    <div style={{color:'#2563eb',textAlign:'center'}}>Uploading...</div>
+                  ) : uploads.w9 ? (
                     <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
                       <div style={{display:'flex',alignItems:'center',gap:12}}>
-                        <div style={{width:36,height:36,display:'flex',alignItems:'center',justifyContent:'center',borderRadius:8,background:'#fff'}}>
-                          <i className="fa-solid fa-file" aria-hidden="true" />
-                        </div>
+                        <i className="fa-solid fa-check-circle" style={{fontSize:22, color:'#22c55e'}} aria-hidden="true" />
                         <div>
-                          <div style={{fontWeight:700}}>{uploads.w9.name}</div>
-                          <small className="field-note">{Math.round(uploads.w9.size/1024)} KB</small>
+                          <div style={{fontWeight:700,color:'#22c55e'}}>{uploads.w9.file.name}</div>
+                          <small className="field-note">{Math.round(uploads.w9.file.size/1024)} KB</small>
                         </div>
                       </div>
-                      <div>
-                        <button type="button" className="btn" onClick={() => handleRemove('w9')}>Remove</button>
-                      </div>
+                      <button type="button" className="btn" onClick={(e) => {e.stopPropagation(); handleRemove('w9')}}>Remove</button>
                     </div>
                   ) : (
-                    <div style={{display:'flex',alignItems:'center',flexDirection:'column',gap:8}} onClick={() => w9Ref.current && w9Ref.current.click()}>
+                    <div style={{display:'flex',alignItems:'center',flexDirection:'column',gap:8}}>
                       <i className="fa-solid fa-cloud-arrow-up" style={{fontSize:22,color:'grey'}} aria-hidden="true" />
                       <div style={{color:'grey', fontWeight:700}}>Click to upload or drag and drop</div>
-                      <small className="field-note">SVG, PNG, JPG or PDF</small>
-                      <input ref={w9Ref} type="file" style={{display:'none'}} onChange={(e)=>handleFileInput('w9', e)} />
+                      <small className="field-note">PDF, PNG, or JPG (max 25MB)</small>
                     </div>
                   )}
                 </div>
 
                 <label>Proof of Business Registration (optional)</label>
-                <div className="upload-box" onDrop={(e)=>handleDrop('proofOfRegistration', e)} onDragOver={preventDefault} onDragEnter={preventDefault} onDragLeave={preventDefault} style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:72}} onClick={() => proofRef.current && proofRef.current.click()}>
-                  {uploads.proofOfRegistration ? (
+                <input ref={proofRef} type="file" style={{display:'none'}} accept=".pdf,.jpg,.jpeg,.png" onChange={(e)=>handleFileInput('proofOfRegistration', 'business_registration', e)} />
+                <div className="upload-box" onDrop={(e)=>handleDrop('proofOfRegistration', 'business_registration', e)} onDragOver={preventDefault} onDragEnter={preventDefault} style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:72,cursor:'pointer'}} onClick={() => !uploads.proofOfRegistration && proofRef.current?.click()}>
+                  {uploading.proofOfRegistration ? (
+                    <div style={{color:'#2563eb'}}>Uploading...</div>
+                  ) : uploads.proofOfRegistration ? (
                     <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%'}}>
                       <div style={{display:'flex',alignItems:'center',gap:12}}>
-                        <div style={{width:36,height:36,display:'flex',alignItems:'center',justifyContent:'center',borderRadius:8,background:'#fff'}}>
-                          <i className="fa-solid fa-file" aria-hidden="true" />
-                        </div>
+                        <i className="fa-solid fa-check-circle" style={{fontSize:18, color:'#22c55e'}} aria-hidden="true" />
                         <div>
-                          <div style={{fontWeight:700}}>{uploads.proofOfRegistration.name}</div>
-                          <small className="field-note">{Math.round(uploads.proofOfRegistration.size/1024)} KB</small>
+                          <div style={{fontWeight:700,color:'#22c55e'}}>{uploads.proofOfRegistration.file.name}</div>
+                          <small className="field-note">{Math.round(uploads.proofOfRegistration.file.size/1024)} KB</small>
                         </div>
                       </div>
-                      <div>
-                        <button type="button" className="btn" onClick={() => handleRemove('proofOfRegistration')}>Remove</button>
-                      </div>
+                      <button type="button" className="btn" onClick={(e) => {e.stopPropagation(); handleRemove('proofOfRegistration')}}>Remove</button>
                     </div>
                   ) : (
-                    <>
-                      <div style={{display:'flex',flexDirection:'column',gap:8,alignItems:'center'}}>
-                        <i className="fa-solid fa-cloud-arrow-up" style={{fontSize:18,color:'grey'}} aria-hidden="true" />
-                        <div style={{color:'grey', fontWeight:700}}>Click to upload or drag and drop</div>
-                        <small className="field-note">SVG, PNG, JPG or PDF</small>
-                      </div>
-                      <input ref={proofRef} type="file" style={{display:'none'}} onChange={(e)=>handleFileInput('proofOfRegistration', e)} />
-                    </>
+                    <div style={{display:'flex',flexDirection:'column',gap:8,alignItems:'center'}}>
+                      <i className="fa-solid fa-cloud-arrow-up" style={{fontSize:18,color:'grey'}} aria-hidden="true" />
+                      <div style={{color:'grey', fontWeight:700}}>Click to upload or drag and drop</div>
+                      <small className="field-note">PDF, PNG, or JPG (max 25MB)</small>
+                    </div>
                   )}
                 </div>
 
-                <label>BMC-84/85 Certificate (hipper/broker)</label>
-                <div className="upload-box" onDrop={(e)=>handleDrop('bmc', e)} onDragOver={preventDefault} onDragEnter={preventDefault} onDragLeave={preventDefault} style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:72}} onClick={() => bmcRef.current && bmcRef.current.click()}>
-                  {uploads.bmc ? (
+                <label>BMC-84/85 Certificate (Shipper/Broker)</label>
+                <input ref={bmcRef} type="file" style={{display:'none'}} accept=".pdf,.jpg,.jpeg,.png" onChange={(e)=>handleFileInput('bmc', 'bmc_certificate', e)} />
+                <div className="upload-box" onDrop={(e)=>handleDrop('bmc', 'bmc_certificate', e)} onDragOver={preventDefault} onDragEnter={preventDefault} style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:72,cursor:'pointer'}} onClick={() => !uploads.bmc && bmcRef.current?.click()}>
+                  {uploading.bmc ? (
+                    <div style={{color:'#2563eb'}}>Uploading...</div>
+                  ) : uploads.bmc ? (
                     <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%'}}>
                       <div style={{display:'flex',alignItems:'center',gap:12}}>
-                        <div style={{width:36,height:36,display:'flex',alignItems:'center',justifyContent:'center',borderRadius:8,background:'#fff'}}>
-                          <i className="fa-solid fa-file" aria-hidden="true" />
-                        </div>
+                        <i className="fa-solid fa-check-circle" style={{fontSize:18, color:'#22c55e'}} aria-hidden="true" />
                         <div>
-                          <div style={{fontWeight:700}}>{uploads.bmc.name}</div>
-                          <small className="field-note">{Math.round(uploads.bmc.size/1024)} KB</small>
+                          <div style={{fontWeight:700,color:'#22c55e'}}>{uploads.bmc.file.name}</div>
+                          <small className="field-note">{Math.round(uploads.bmc.file.size/1024)} KB</small>
                         </div>
                       </div>
-                      <div>
-                        <button type="button" className="btn" onClick={() => handleRemove('bmc')}>Remove</button>
-                      </div>
+                      <button type="button" className="btn" onClick={(e) => {e.stopPropagation(); handleRemove('bmc')}}>Remove</button>
                     </div>
                   ) : (
-                    <>
-                      <div style={{display:'flex',flexDirection:'column',gap:8,alignItems:'center'}}>
-                        <i className="fa-solid fa-cloud-arrow-up" style={{fontSize:18,color:'grey'}} aria-hidden="true" />
-                        <div style={{color:'grey', fontWeight:700}}>Click to upload or drag and drop</div>
-                        <small className="field-note">SVG, PNG, JPG or PDF</small>
-                      </div>
-                      <input ref={bmcRef} type="file" style={{display:'none'}} onChange={(e)=>handleFileInput('bmc', e)} />
-                    </>
+                    <div style={{display:'flex',flexDirection:'column',gap:8,alignItems:'center'}}>
+                      <i className="fa-solid fa-cloud-arrow-up" style={{fontSize:18,color:'grey'}} aria-hidden="true" />
+                      <div style={{color:'grey', fontWeight:700}}>Click to upload or drag and drop</div>
+                      <small className="field-note">PDF, PNG, or JPG (max 25MB)</small>
+                    </div>
                   )}
                 </div>
 
                 <label>Certificate of Insurance</label>
-                <div className="upload-box" onDrop={(e)=>handleDrop('coi', e)} onDragOver={preventDefault} onDragEnter={preventDefault} onDragLeave={preventDefault} style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:72}} onClick={() => coiRef.current && coiRef.current.click()}>
-                  {uploads.coi ? (
+                <input ref={coiRef} type="file" style={{display:'none'}} accept=".pdf,.jpg,.jpeg,.png" onChange={(e)=>handleFileInput('coi', 'coi', e)} />
+                <div className="upload-box" onDrop={(e)=>handleDrop('coi', 'coi', e)} onDragOver={preventDefault} onDragEnter={preventDefault} style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:72,cursor:'pointer'}} onClick={() => !uploads.coi && coiRef.current?.click()}>
+                  {uploading.coi ? (
+                    <div style={{color:'#2563eb'}}>Uploading...</div>
+                  ) : uploads.coi ? (
                     <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%'}}>
                       <div style={{display:'flex',alignItems:'center',gap:12}}>
-                        <div style={{width:36,height:36,display:'flex',alignItems:'center',justifyContent:'center',borderRadius:8,background:'#fff'}}>
-                          <i className="fa-solid fa-file" aria-hidden="true" />
-                        </div>
+                        <i className="fa-solid fa-check-circle" style={{fontSize:18, color:'#22c55e'}} aria-hidden="true" />
                         <div>
-                          <div style={{fontWeight:700}}>{uploads.coi.name}</div>
-                          <small className="field-note">{Math.round(uploads.coi.size/1024)} KB</small>
+                          <div style={{fontWeight:700,color:'#22c55e'}}>{uploads.coi.file.name}</div>
+                          <small className="field-note">{Math.round(uploads.coi.file.size/1024)} KB</small>
                         </div>
                       </div>
-                      <div>
-                        <button type="button" className="btn" onClick={() => handleRemove('coi')}>Remove</button>
-                      </div>
+                      <button type="button" className="btn" onClick={(e) => {e.stopPropagation(); handleRemove('coi')}}>Remove</button>
                     </div>
                   ) : (
-                    <>
-                      <div style={{display:'flex',flexDirection:'column',gap:8,alignItems:'center'}}>
-                        <i className="fa-solid fa-cloud-arrow-up" style={{fontSize:18,color:'grey'}} aria-hidden="true" />
-                        <div style={{color:'grey', fontWeight:700}}>Click to upload or drag and drop</div>
-                        <small className="field-note">SVG, PNG, JPG or PDF</small>
-                      </div>
-                      <input ref={coiRef} type="file" style={{display:'none'}} onChange={(e)=>handleFileInput('coi', e)} />
-                    </>
+                    <div style={{display:'flex',flexDirection:'column',gap:8,alignItems:'center'}}>
+                      <i className="fa-solid fa-cloud-arrow-up" style={{fontSize:18,color:'grey'}} aria-hidden="true" />
+                      <div style={{color:'grey', fontWeight:700}}>Click to upload or drag and drop</div>
+                      <small className="field-note">PDF, PNG, or JPG (max 25MB)</small>
+                    </div>
                   )}
                 </div>
               </>
@@ -327,21 +424,32 @@ export default function ShipperOnboarding(){
 
             {currentStep === 5 && (
               <>
-                <FinalReview />
+                <ShipperFinalReview
+                  shipperData={shipperData}
+                  preferences={preferences}
+                  uploads={uploads}
+                  setCurrentStep={setCurrentStep}
+                />
               </>
             )}
 
             <div className="divider-line" />
 
+            {saveError && (
+              <div style={{padding:'12px',background:'#fee2e2',color:'#dc2626',borderRadius:'8px',marginBottom:'16px'}}>
+                {saveError}
+              </div>
+            )}
+
             <div className="onboarding-actions">
-              <button type="button" className="btn btn-secondary" onClick={handleBack} disabled={currentStep===1}>Back</button>
-              {/* Next is disabled on final step OR when on step 3 and required W-9 not uploaded */}
+              <button type="button" className="btn btn-secondary" onClick={handleBack} disabled={currentStep===1 || saving}>Back</button>
               <button
                 type="button"
                 className={"btn btn-primary " + (currentStep===5 ? '' : 'enabled')}
-                onClick={currentStep===5 ? () => navigate('/shipper-dashboard') : handleNext}
+                onClick={currentStep===5 ? handleFinish : handleNext}
+                disabled={saving}
               >
-                {currentStep===5? 'Finish' : 'Next'}
+                {saving ? 'Saving...' : (currentStep===5 ? 'Finish' : 'Next')}
               </button>
             </div>
           </form>
@@ -355,29 +463,14 @@ export default function ShipperOnboarding(){
   )
 }
 
-function FinalReview(){
-  // We import outer-scope state by reading DOM where necessary and using the captured state via closures.
-  // To keep this component simple and local, we'll rely on the fact that the parent file defines
-  // `shipperData`, `preferences`, `uploads`, and `setCurrentStep` in the same module scope.
-  // eslint-disable-next-line no-unused-vars
-  const _ = null
-  // The parent component's scope provides the variables via closure when this function
-  // is evaluated after the parent. We reference them using `window` fallback for safety.
-  // (This avoids changing other components but shows the review.)
-
-  // Grab from module scope if available
-  // eslint-disable-next-line no-undef
-  const parent = typeof window !== 'undefined' ? window : null
-
-  // Try to access the variables directly; if not present, fall back to defaults.
-  // Note: In this bundler environment the closure variables are available, so this will work.
-  // eslint-disable-next-line no-restricted-globals
-  const data = (typeof shipperData !== 'undefined') ? shipperData : {
+function ShipperFinalReview({ shipperData, preferences, uploads, setCurrentStep }){
+  // Props are now passed directly from parent component
+  const data = shipperData || {
     businessType: 'shipper', businessName: '', taxId: '', businessAddress: '', businessPhone: '', businessEmail: '', website: '', contactFullName: '', contactTitle: '', contactPhone: '', contactEmail: ''
   }
-  const prefs = (typeof preferences !== 'undefined') ? preferences : { freightType: 'Dry Van', preferredEquipment: '', avgMonthlyVolume: '', regionsOfOperation: '' }
-  const ups = (typeof uploads !== 'undefined') ? uploads : { w9: null, proofOfRegistration: null, bmc: null, coi: null }
-  const setStep = (typeof setCurrentStep === 'function') ? setCurrentStep : (()=>{})
+  const prefs = preferences || { freightType: 'Dry Van', preferredEquipment: '', avgMonthlyVolume: '', regionsOfOperation: '' }
+  const ups = uploads || { w9: null, proofOfRegistration: null, bmc: null, coi: null }
+  const setStep = setCurrentStep || (()=>{})
 
   return (
     <div style={{border:'1px solid #eef2f7',borderRadius:8,padding:16,display:'flex',flexDirection:'column',gap:12}}>
@@ -414,22 +507,42 @@ function FinalReview(){
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
           <div style={{padding:8,border:'1px solid #f1f5f9',borderRadius:8}}>
             <div style={{fontWeight:700}}>W-9</div>
-            <div style={{color: ups.w9 ? '#064e3b' : '#6b7280'}}>{ups.w9 ? `${ups.w9.name} (${Math.round(ups.w9.size/1024)} KB)` : 'Not uploaded'}</div>
+            {ups.w9 ? (
+              <div style={{color:'#22c55e', display:'flex', alignItems:'center', gap:4}}>
+                <i className="fa-solid fa-check-circle" aria-hidden="true" />
+                {ups.w9.file?.name || ups.w9.name || 'Uploaded'}
+              </div>
+            ) : <div style={{color:'#f59e0b'}}>Not uploaded</div>}
           </div>
 
           <div style={{padding:8,border:'1px solid #f1f5f9',borderRadius:8}}>
             <div style={{fontWeight:700}}>Proof of Registration</div>
-            <div style={{color: ups.proofOfRegistration ? '#064e3b' : '#6b7280'}}>{ups.proofOfRegistration ? `${ups.proofOfRegistration.name} (${Math.round(ups.proofOfRegistration.size/1024)} KB)` : 'Not uploaded'}</div>
+            {ups.proofOfRegistration ? (
+              <div style={{color:'#22c55e', display:'flex', alignItems:'center', gap:4}}>
+                <i className="fa-solid fa-check-circle" aria-hidden="true" />
+                {ups.proofOfRegistration.file?.name || ups.proofOfRegistration.name || 'Uploaded'}
+              </div>
+            ) : <div style={{color:'#f59e0b'}}>Not uploaded</div>}
           </div>
 
           <div style={{padding:8,border:'1px solid #f1f5f9',borderRadius:8}}>
             <div style={{fontWeight:700}}>BMC-84/85</div>
-            <div style={{color: ups.bmc ? '#064e3b' : '#6b7280'}}>{ups.bmc ? `${ups.bmc.name} (${Math.round(ups.bmc.size/1024)} KB)` : 'Not uploaded'}</div>
+            {ups.bmc ? (
+              <div style={{color:'#22c55e', display:'flex', alignItems:'center', gap:4}}>
+                <i className="fa-solid fa-check-circle" aria-hidden="true" />
+                {ups.bmc.file?.name || ups.bmc.name || 'Uploaded'}
+              </div>
+            ) : <div style={{color:'#f59e0b'}}>Not uploaded</div>}
           </div>
 
           <div style={{padding:8,border:'1px solid #f1f5f9',borderRadius:8}}>
             <div style={{fontWeight:700}}>Certificate of Insurance</div>
-            <div style={{color: ups.coi ? '#064e3b' : '#6b7280'}}>{ups.coi ? `${ups.coi.name} (${Math.round(ups.coi.size/1024)} KB)` : 'Not uploaded'}</div>
+            {ups.coi ? (
+              <div style={{color:'#22c55e', display:'flex', alignItems:'center', gap:4}}>
+                <i className="fa-solid fa-check-circle" aria-hidden="true" />
+                {ups.coi.file?.name || ups.coi.name || 'Uploaded'}
+              </div>
+            ) : <div style={{color:'#f59e0b'}}>Not uploaded</div>}
           </div>
         </div>
       </section>

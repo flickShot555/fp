@@ -186,3 +186,11 @@
 @media (min-width: 1025px) {
   .dv-table .c-actions .row-actions{display:none}
 }
+
+.div-style-comp {
+background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.dark-root .div-style-comp {
+  background: var(--fp-sidebar-bg); box-shadow: 0 1px 3px rgba(255,255,255,0.1);
+}

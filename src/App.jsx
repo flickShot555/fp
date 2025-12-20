@@ -16,9 +16,19 @@ import SuperAdminDashboard from './components/super_admin/SuperAdminDashboard'
 import CarrierOnboarding from './components/onboarding/CarrierOnboarding'
 import DriverOnboarding from './components/onboarding/DriverOnboarding'
 import ShipperOnboarding from './components/onboarding/ShipperOnboarding'
+import ProtectedRoute from './components/ProtectedRoute'
 import './App.css'
+
 import Chatbot from './components/landing_page/Chatbot'
 import { useState } from 'react'
+
+// 🛑 ADDED: Import for the Password Reset component 🛑
+// BEFORE (Fails, because it looks for the file in the root of 'components'):
+// import ForgotPassword from "./components/ForgotPassword"; 
+
+// AFTER (Correct, navigates into the sub-folder):
+import ForgotPassword from "./components/forgot-password";
+
 import AI from '/src/assets/chatbot.svg'
 
 function App() {
@@ -49,21 +59,65 @@ function InnerRoutes({ chatOpen, chatMinimized, setChatOpen, setChatMinimized })
         <Route path="/" element={<LandingPage />} />
         <Route path="/help-center" element={<HelpCenter />} />
         <Route path="/faq" element={<HelpCenter />} />
-  <Route path="/select-role" element={<RoleSelection />} />
-  <Route path="/signup" element={<Signup />} />
-  <Route path="/login" element={<Login />} />
-  <Route path="/admin-signup" element={<AdminSignup />} />
-  <Route path="/admin-login" element={<AdminLogin />} />
-  <Route path="/onboarding/carrier" element={<CarrierOnboarding />} />
-  <Route path="/onboarding/driver" element={<DriverOnboarding />} />
-  <Route path="/onboarding/shipper" element={<ShipperOnboarding />} />
-  <Route path="/verify" element={<Verification />} />
-  <Route path="/admin-verify" element={<AdminVerification />} />
-  <Route path="/carrier-dashboard" element={<CarrierDashboard />} />
-  <Route path="/driver-dashboard" element={<DriverDashboard />} />
-  <Route path="/admin-dashboard" element={<AdminDashboard />} />
-  <Route path="/super-admin-dashboard" element={<SuperAdminDashboard />} />
-  <Route path="/shipper-dashboard" element={<ShipperDashboard />} />
+        <Route path="/select-role" element={<RoleSelection />} />
+        <Route path="/signup" element={<Signup />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/admin-signup" element={<AdminSignup />} />
+        <Route path="/admin-login" element={<AdminLogin />} />
+        
+        {/* 🛑 NEW ROUTE ADDED HERE 🛑 */}
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+
+        {/* Onboarding Routes - Accessible right after signup */}
+        <Route path="/carrier-onboarding" element={<CarrierOnboarding />} />
+        <Route path="/driver-onboarding" element={<DriverOnboarding />} />
+        <Route path="/shipper-onboarding" element={<ShipperOnboarding />} />
+
+        {/* Protected Onboarding Routes (legacy) */}
+        <Route path="/onboarding/carrier" element={
+          <ProtectedRoute allowedRoles={['carrier']}>
+            <CarrierOnboarding />
+          </ProtectedRoute>
+        } />
+        <Route path="/onboarding/driver" element={
+          <ProtectedRoute allowedRoles={['driver']}>
+            <DriverOnboarding />
+          </ProtectedRoute>
+        } />
+        <Route path="/onboarding/shipper" element={
+          <ProtectedRoute allowedRoles={['shipper']}>
+            <ShipperOnboarding />
+          </ProtectedRoute>
+        } />
+        <Route path="/verify" element={<Verification />} />
+        <Route path="/admin-verify" element={<AdminVerification />} />
+
+        {/* Protected Dashboard Routes - Require authentication */}
+        <Route path="/carrier-dashboard" element={
+          <ProtectedRoute allowedRoles={['carrier']}>
+            <CarrierDashboard />
+          </ProtectedRoute>
+        } />
+        <Route path="/driver-dashboard" element={
+          <ProtectedRoute allowedRoles={['driver']}>
+            <DriverDashboard />
+          </ProtectedRoute>
+        } />
+        <Route path="/admin-dashboard" element={
+          <ProtectedRoute allowedRoles={['admin']}>
+            <AdminDashboard />
+          </ProtectedRoute>
+        } />
+        <Route path="/super-admin-dashboard" element={
+          <ProtectedRoute allowedRoles={['super_admin', 'admin']}>
+            <SuperAdminDashboard />
+          </ProtectedRoute>
+        } />
+        <Route path="/shipper-dashboard" element={
+          <ProtectedRoute allowedRoles={['shipper']}>
+            <ShipperDashboard />
+          </ProtectedRoute>
+        } />
       </Routes>
       {showChat && <Chatbot isOpen={chatOpen} onClose={() => setChatOpen(false)} onMinimizeChange={(min)=>{ setChatMinimized(min) }} />}
     </>

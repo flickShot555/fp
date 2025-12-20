@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import { API_URL } from '../../config';
 
 import DocumentVault from './DocumentVault';
 import Marketplace from './Marketplace';
@@ -8,15 +9,64 @@ import HiringOnboarding from './HiringOnboarding';
 import AccountSettings from './AccountSettings';
 import AiHub from './AiHub';
 import ConsentESignature from './ConsentESignature';
+// OnboardingCoach removed - compliance data now shown in Compliance & Safety page
 import '../../styles/driver/DriverDashboard.css';
 import logo from '/src/assets/logo.png';
 import resp_logo from '/src/assets/logo_1.png';
 
 export default function DriverDashboard() {
+  const { currentUser } = useAuth();
   const [activeNav, setActiveNav] = useState('home');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isPostHire, setIsPostHire] = useState(false);
+
+  // Onboarding data state
+  const [driverProfile, setDriverProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [onboardingScore, setOnboardingScore] = useState(null);
+
+  // Fetch onboarding data on mount
+  useEffect(() => {
+    const fetchProfile = async () => {
+      if (!currentUser) {
+        setProfileLoading(false);
+        return;
+      }
+      try {
+        const token = await currentUser.getIdToken();
+        const response = await fetch(`${API_URL}/onboarding/data`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setDriverProfile(data);
+          if (typeof data.onboarding_score !== 'undefined') {
+            setOnboardingScore(data.onboarding_score);
+          }
+        }
+
+        // Fetch onboarding coach for progress/score if available
+        const coachRes = await fetch(`${API_URL}/onboarding/coach-status`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (coachRes.ok) {
+          const coach = await coachRes.json();
+          if (typeof coach.total_score !== 'undefined') {
+            setOnboardingScore(coach.total_score);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching profile:', error);
+      } finally {
+        setProfileLoading(false);
+      }
+    };
+    fetchProfile();
+  }, [currentUser]);
 
   const navGroups = [
     {
@@ -28,9 +78,10 @@ export default function DriverDashboard() {
       ]
     },
     {
-      title: 'MANAGEMENT', 
+      title: 'MANAGEMENT',
       items: [
         { key: 'carrier', label: 'My Carrier', icon: 'fa-solid fa-building' },
+        { key: 'compliance', label: 'Compliance & Safety', icon: 'fa-solid fa-shield-halved' },
         { key: 'hiring', label: 'Hiring & Onboarding', icon: 'fa-solid fa-user-plus' },
         { key: 'esign', label: 'Consent & E-Signature', icon: 'fa-solid fa-pen-fancy' }
       ]
@@ -57,6 +108,50 @@ export default function DriverDashboard() {
             <button onClick={() => setIsPostHire(true)} className="btn small green-btn">Post Hire</button>
           </div>
         </header>
+
+        {/* Driver Profile Card - Shows onboarding data */}
+        {!profileLoading && driverProfile && driverProfile.data && (
+          <section style={{ marginBottom: '20px' }}>
+            <div className="card" style={{ padding: '20px', background: '#f8fafc' }}>
+              <div className="card-header">
+                <h3><i className="fa-solid fa-user" style={{ marginRight: '8px' }}></i>Driver Profile</h3>
+                {onboardingScore !== null && (
+                  <div className="pill" style={{ background:'#e0f2fe', color:'#075985', padding:'6px 10px', borderRadius:'999px', fontWeight:600 }}>
+                    Onboarding Score: {Math.round(onboardingScore)}%
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginTop: '16px' }}>
+                {driverProfile.data.fullName && (
+                  <div><strong>Name:</strong> {driverProfile.data.fullName}</div>
+                )}
+                {driverProfile.data.cdlNumber && (
+                  <div><strong>CDL Number:</strong> {driverProfile.data.cdlNumber}</div>
+                )}
+                {driverProfile.data.cdlClass && (
+                  <div><strong>CDL Class:</strong> {driverProfile.data.cdlClass}</div>
+                )}
+                {driverProfile.data.issuingState && (
+                  <div><strong>Issuing State:</strong> {driverProfile.data.issuingState}</div>
+                )}
+                {driverProfile.data.preferredRegions && (
+                  <div><strong>Preferred Regions:</strong> {driverProfile.data.preferredRegions}</div>
+                )}
+                {driverProfile.data.equipmentExperience && (
+                  <div><strong>Equipment Experience:</strong> {driverProfile.data.equipmentExperience}</div>
+                )}
+              </div>
+              {!driverProfile.onboarding_completed && (
+                <div style={{ marginTop: '16px', padding: '12px', background: '#fef3c7', borderRadius: '8px', color: '#92400e' }}>
+                  <i className="fa-solid fa-exclamation-triangle" style={{ marginRight: '8px' }}></i>
+                  Onboarding not complete. <a href="/driver-onboarding" style={{ color: '#1d4ed8', textDecoration: 'underline' }}>Complete now</a>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* Onboarding Coach removed - compliance data now shown in Compliance & Safety page */}
 
         <section className="fp-grid">
           {/* Onboarding Progress Card */}
@@ -405,6 +500,216 @@ export default function DriverDashboard() {
     );
   }
 
+  // Driver Compliance View Component
+  function DriverComplianceView() {
+    const [loading, setLoading] = useState(true);
+    const [complianceStatus, setComplianceStatus] = useState({
+      score: 0, breakdown: {}, status_color: 'Red', documents: [], issues: [], warnings: [], recommendations: []
+    });
+    const [complianceData, setComplianceData] = useState({
+      cdlNumber: '', cdlState: '', cdlClass: '', cdlExpiry: '', medicalCardExpiry: '',
+      drugTestStatus: 'pending', mvrStatus: 'pending', clearinghouseStatus: 'pending'
+    });
+    const [complianceTasks, setComplianceTasks] = useState([]);
+    const [aiAnalysis, setAiAnalysis] = useState(null);
+    const [analyzingAI, setAnalyzingAI] = useState(false);
+
+    useEffect(() => {
+      if (!currentUser) return;
+      const fetchData = async () => {
+        setLoading(true);
+        try {
+          const token = await currentUser.getIdToken();
+          const statusRes = await fetch(`${API_URL}/compliance/status`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (statusRes.ok) {
+            const data = await statusRes.json();
+            setComplianceStatus({
+              score: data.compliance_score || 0, breakdown: data.score_breakdown || {},
+              status_color: data.status_color || 'Red', documents: data.documents || [],
+              issues: data.issues || [], warnings: data.warnings || [],
+              recommendations: data.recommendations || []
+            });
+            if (data.role_data) {
+              setComplianceData(prev => ({
+                ...prev, cdlNumber: data.role_data.cdl_number || '', cdlState: data.role_data.cdl_state || '',
+                cdlClass: data.role_data.cdl_class || '', cdlExpiry: data.role_data.cdl_expiry || '',
+                medicalCardExpiry: data.role_data.medical_card_expiry || '',
+                drugTestStatus: data.role_data.drug_test_status || 'pending',
+                mvrStatus: data.role_data.mvr_status || 'pending',
+                clearinghouseStatus: data.role_data.clearinghouse_status || 'pending'
+              }));
+            }
+          }
+          const tasksRes = await fetch(`${API_URL}/compliance/tasks`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (tasksRes.ok) setComplianceTasks(await tasksRes.json());
+        } catch (e) { console.error('Error:', e); }
+        finally { setLoading(false); }
+      };
+      fetchData();
+    }, [currentUser]);
+
+    const runAIAnalysis = async () => {
+      if (!currentUser) return;
+      setAnalyzingAI(true);
+      try {
+        const token = await currentUser.getIdToken();
+        const res = await fetch(`${API_URL}/compliance/ai-analyze`, {
+          method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) setAiAnalysis(await res.json());
+      } catch (e) { console.error('AI error:', e); }
+      finally { setAnalyzingAI(false); }
+    };
+
+    const getScoreColor = (score) => score >= 80 ? '#10b981' : score >= 50 ? '#f59e0b' : '#ef4444';
+
+    if (loading) return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '300px' }}>
+        <i className="fas fa-spinner fa-spin" style={{ fontSize: '2rem', color: '#3b82f6' }}></i>
+        <span style={{ marginLeft: '10px' }}>Loading compliance data...</span>
+      </div>
+    );
+
+    return (
+      <div style={{ padding: '20px' }}>
+        <header style={{ marginBottom: '20px' }}>
+          <h2 style={{ margin: 0 }}>Compliance & Safety</h2>
+          <p style={{ color: '#6b7280', margin: '8px 0' }}>Monitor your compliance status and required documents</p>
+        </header>
+
+        {/* Score Card */}
+        <div className="card" style={{ padding: '20px', marginBottom: '20px', background: 'linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%)', color: 'white' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h3 style={{ margin: 0, color: 'white' }}>AI Compliance Score</h3>
+              <p style={{ margin: '8px 0 0', opacity: 0.8 }}>Based on documents, verification, and completeness</p>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: '48px', fontWeight: 'bold', color: getScoreColor(complianceStatus.score) }}>
+                {complianceStatus.score}%
+              </div>
+              <div style={{ fontSize: '14px', opacity: 0.8 }}>{complianceStatus.status_color} Status</div>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginTop: '20px' }}>
+            {Object.entries(complianceStatus.breakdown).map(([key, val]) => (
+              <div key={key} style={{ background: 'rgba(255,255,255,0.1)', padding: '12px', borderRadius: '8px', textAlign: 'center' }}>
+                <div style={{ fontSize: '12px', opacity: 0.8, textTransform: 'capitalize' }}>{key.replace('_', ' ')}</div>
+                <div style={{ fontSize: '20px', fontWeight: '600' }}>{val}%</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px' }}>
+          {/* Left Column */}
+          <div>
+            {/* CDL & Credentials */}
+            <div className="card" style={{ padding: '20px', marginBottom: '20px' }}>
+              <h4 style={{ margin: '0 0 16px' }}><i className="fas fa-id-card" style={{ marginRight: '8px' }}></i>CDL & Credentials</h4>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+                <div><strong>CDL Number:</strong> {complianceData.cdlNumber || 'Not provided'}</div>
+                <div><strong>CDL State:</strong> {complianceData.cdlState || 'Not provided'}</div>
+                <div><strong>CDL Class:</strong> {complianceData.cdlClass || 'Not provided'}</div>
+                <div><strong>CDL Expiry:</strong> {complianceData.cdlExpiry || 'Not provided'}</div>
+                <div><strong>Medical Card Expiry:</strong> {complianceData.medicalCardExpiry || 'Not provided'}</div>
+              </div>
+            </div>
+
+            {/* Compliance Checks */}
+            <div className="card" style={{ padding: '20px', marginBottom: '20px' }}>
+              <h4 style={{ margin: '0 0 16px' }}><i className="fas fa-clipboard-check" style={{ marginRight: '8px' }}></i>Compliance Checks</h4>
+              <div style={{ display: 'grid', gap: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#f8fafc', borderRadius: '8px' }}>
+                  <span>Drug Test</span>
+                  <span className={`int-status-badge ${complianceData.drugTestStatus === 'passed' ? 'active' : 'pending'}`}>
+                    {complianceData.drugTestStatus}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#f8fafc', borderRadius: '8px' }}>
+                  <span>MVR Check</span>
+                  <span className={`int-status-badge ${complianceData.mvrStatus === 'passed' ? 'active' : 'pending'}`}>
+                    {complianceData.mvrStatus}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#f8fafc', borderRadius: '8px' }}>
+                  <span>FMCSA Clearinghouse</span>
+                  <span className={`int-status-badge ${complianceData.clearinghouseStatus === 'passed' ? 'active' : 'pending'}`}>
+                    {complianceData.clearinghouseStatus}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Documents */}
+            <div className="card" style={{ padding: '20px' }}>
+              <h4 style={{ margin: '0 0 16px' }}><i className="fas fa-file-alt" style={{ marginRight: '8px' }}></i>Uploaded Documents</h4>
+              {complianceStatus.documents && complianceStatus.documents.length > 0 ? (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead><tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                    <th style={{ textAlign: 'left', padding: '8px' }}>Document</th>
+                    <th style={{ textAlign: 'left', padding: '8px' }}>Type</th>
+                    <th style={{ textAlign: 'left', padding: '8px' }}>Expiry</th>
+                    <th style={{ textAlign: 'left', padding: '8px' }}>Status</th>
+                    <th style={{ textAlign: 'left', padding: '8px' }}>Uploaded</th>
+                  </tr></thead>
+                  <tbody>
+                    {complianceStatus.documents.map((doc, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                        <td style={{ padding: '8px' }}>{doc.file_name || doc.filename || 'Document'}</td>
+                        <td style={{ padding: '8px', fontSize: '12px' }}>{(doc.document_type || doc.type || 'OTHER').replace(/_/g, ' ').toUpperCase()}</td>
+                        <td style={{ padding: '8px', fontSize: '12px', color: '#6b7280' }}>
+                          {doc.expiry_date ? new Date(doc.expiry_date).toLocaleDateString() : 'N/A'}
+                        </td>
+                        <td style={{ padding: '8px' }}>
+                          <span className={`int-status-badge ${doc.status === 'Valid' ? 'active' : doc.status === 'Expired' ? 'inactive' : 'pending'}`}>
+                            {doc.status || 'Unknown'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '8px', color: '#6b7280', fontSize: '12px' }}>
+                          {doc.uploaded_at ? new Date(doc.uploaded_at * 1000).toLocaleDateString('en-US', { 
+                            month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                          }) : 'N/A'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : <p style={{ color: '#6b7280' }}>No documents uploaded yet</p>}
+            </div>
+          </div>
+
+          {/* Right Column - AI Assistant */}
+          <div>
+            <div className="card" style={{ padding: '20px' }}>
+              <h4 style={{ margin: '0 0 16px' }}><i className="fas fa-robot" style={{ marginRight: '8px' }}></i>AI Compliance Assistant</h4>
+              <button onClick={runAIAnalysis} disabled={analyzingAI} className="btn small-cd" style={{ width: '100%', marginBottom: '16px' }}>
+                {analyzingAI ? 'Analyzing...' : 'Run AI Analysis'}
+              </button>
+              {aiAnalysis && (
+                <div style={{ padding: '12px', background: '#f0fdf4', borderRadius: '8px', marginBottom: '16px' }}>
+                  <strong>Risk Level:</strong> {aiAnalysis.analysis?.risk_level || 'Unknown'}
+                  <p style={{ margin: '8px 0 0', fontSize: '14px' }}>{aiAnalysis.analysis?.summary || ''}</p>
+                </div>
+              )}
+              <h5 style={{ margin: '16px 0 8px' }}>Tasks</h5>
+              {complianceTasks.length > 0 ? complianceTasks.slice(0, 5).map((task, idx) => (
+                <div key={idx} style={{ padding: '8px', background: '#f8fafc', borderRadius: '6px', marginBottom: '8px', fontSize: '14px' }}>
+                  <strong>{task.title}</strong>
+                  <div style={{ color: '#6b7280', fontSize: '12px' }}>{task.description}</div>
+                </div>
+              )) : <p style={{ color: '#6b7280', fontSize: '14px' }}>No pending tasks</p>}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function ContentView({ activeNav }) {
     switch (activeNav) {
       case 'home':
@@ -415,6 +720,8 @@ export default function DriverDashboard() {
         return <Marketplace isPostHire={isPostHire} setIsPostHire={setIsPostHire} />;
       case 'carrier':
         return <MyCarrier />;
+      case 'compliance':
+        return <DriverComplianceView />;
       case 'hiring':
         return <HiringOnboarding />;
       case 'esign':

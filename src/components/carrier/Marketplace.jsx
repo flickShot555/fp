@@ -1,9 +1,15 @@
 import React, { useState, useEffect } from 'react'
 import '../../styles/carrier/Marketplace.css'
 import '../../styles/carrier/ServicesPage.css'
+import { useAuth } from '../../contexts/AuthContext'
+import { API_URL } from '../../config'
 
-export default function Marketplace() {
-  const [activeTab, setActiveTab] = useState('loads') // loads | drivers | services
+// Minimum onboarding score required to access marketplace
+const MARKETPLACE_THRESHOLD = 60
+
+export default function Marketplace({ activeSection, setActiveSection }) {
+  const { currentUser } = useAuth()
+  const [activeTab, setActiveTab] = useState(activeSection || 'loads') // loads | drivers | services
   const [searchQuery, setSearchQuery] = useState('')
   const [equipmentType, setEquipmentType] = useState('')
   const [origin, setOrigin] = useState('')
@@ -13,6 +19,88 @@ export default function Marketplace() {
   const [serviceTab, setServiceTab] = useState('all')
   const [showSidebar, setShowSidebar] = useState(true)
   const [isMobile, setIsMobile] = useState(false)
+
+  // Marketplace gating state
+  const [isMarketplaceReady, setIsMarketplaceReady] = useState(true)
+  const [onboardingScore, setOnboardingScore] = useState(100)
+  const [nextActions, setNextActions] = useState([])
+  const [checkingAccess, setCheckingAccess] = useState(true)
+  const [consentEligible, setConsentEligible] = useState(true)
+  const [missingConsents, setMissingConsents] = useState([])
+  const [gatingReason, setGatingReason] = useState('')
+
+  // Check onboarding status AND consent eligibility to gate marketplace
+  useEffect(() => {
+    const checkMarketplaceAccess = async () => {
+      if (!currentUser) {
+        setCheckingAccess(false)
+        return
+      }
+
+      try {
+        const token = await currentUser.getIdToken()
+
+        // Check onboarding score
+        const onboardingResponse = await fetch(`${API_URL}/onboarding/coach-status`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        })
+
+        let scoreOk = true
+        if (onboardingResponse.ok) {
+          const data = await onboardingResponse.json()
+          const score = data.total_score || 0
+          setOnboardingScore(score)
+          scoreOk = score >= MARKETPLACE_THRESHOLD
+          setNextActions(data.next_best_actions || [])
+        }
+
+        // Check consent eligibility
+        const consentResponse = await fetch(`${API_URL}/consents/marketplace-eligibility`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        })
+
+        let consentsOk = true
+        if (consentResponse.ok) {
+          const consentData = await consentResponse.json()
+          consentsOk = consentData.eligible
+          setConsentEligible(consentData.eligible)
+          setMissingConsents(consentData.missing_consents || [])
+        }
+
+        // Determine gating reason
+        if (!scoreOk && !consentsOk) {
+          setGatingReason('both')
+        } else if (!scoreOk) {
+          setGatingReason('score')
+        } else if (!consentsOk) {
+          setGatingReason('consent')
+        }
+
+        setIsMarketplaceReady(scoreOk && consentsOk)
+      } catch (error) {
+        console.error('Error checking marketplace access:', error)
+        // Allow access if check fails (graceful degradation)
+        setIsMarketplaceReady(true)
+      } finally {
+        setCheckingAccess(false)
+      }
+    }
+
+    checkMarketplaceAccess()
+  }, [currentUser])
+
+  // Sync activeTab when activeSection prop changes
+  useEffect(() => {
+    if (activeSection) {
+      setActiveTab(activeSection)
+    }
+  }, [activeSection])
 
   useEffect(() => {
     const handleResize = () => {
@@ -28,6 +116,202 @@ export default function Marketplace() {
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
   }, [])
+
+  // Show loading state while checking access
+  if (checkingAccess) {
+    return (
+      <div className="marketplace-loading" style={{ padding: '40px', textAlign: 'center' }}>
+        <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '2rem', color: '#3b82f6' }}></i>
+        <p style={{ marginTop: '10px', color: '#64748b' }}>Checking marketplace access...</p>
+      </div>
+    )
+  }
+
+  // Show gating message if onboarding not complete or consents missing
+  if (!isMarketplaceReady) {
+    return (
+      <div className="marketplace-gated" style={{
+        padding: '60px 40px',
+        textAlign: 'center',
+        background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
+        borderRadius: '16px',
+        margin: '20px',
+        border: '1px solid #e2e8f0'
+      }}>
+        <div style={{
+          width: '80px',
+          height: '80px',
+          background: '#fef3c7',
+          borderRadius: '50%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          margin: '0 auto 20px'
+        }}>
+          <i className="fa-solid fa-lock" style={{ fontSize: '2rem', color: '#f59e0b' }}></i>
+        </div>
+
+        <h2 style={{ fontSize: '1.75rem', color: '#1e293b', marginBottom: '10px' }}>
+          Marketplace Access Locked
+        </h2>
+
+        <p style={{ color: '#64748b', marginBottom: '20px', maxWidth: '500px', margin: '0 auto 20px' }}>
+          {gatingReason === 'consent'
+            ? 'You must sign all required consent forms to access the marketplace.'
+            : gatingReason === 'both'
+            ? 'Complete your onboarding and sign required consent forms to unlock the marketplace.'
+            : `Complete your onboarding to unlock the marketplace. You need a score of at least ${MARKETPLACE_THRESHOLD}% to access loads, drivers, and services.`
+          }
+        </p>
+
+        {/* Show missing consents if applicable */}
+        {!consentEligible && missingConsents.length > 0 && (
+          <div style={{
+            background: '#fef2f2',
+            padding: '15px 20px',
+            borderRadius: '12px',
+            maxWidth: '400px',
+            margin: '0 auto 20px',
+            border: '1px solid #fecaca'
+          }}>
+            <div style={{ fontWeight: '600', color: '#dc2626', marginBottom: '10px' }}>
+              <i className="fa-solid fa-file-signature" style={{ marginRight: '8px' }}></i>
+              Missing Required Consents
+            </div>
+            <ul style={{ textAlign: 'left', margin: 0, paddingLeft: '20px', color: '#7f1d1d' }}>
+              {missingConsents.map((consent, idx) => (
+                <li key={idx} style={{ marginBottom: '5px' }}>
+                  {consent.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                </li>
+              ))}
+            </ul>
+            <button
+              onClick={() => window.location.href = '/carrier/consent'}
+              style={{
+                marginTop: '15px',
+                padding: '10px 20px',
+                background: '#dc2626',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: '600'
+              }}
+            >
+              Sign Consent Forms
+            </button>
+          </div>
+        )}
+
+        {/* Show onboarding score if applicable */}
+        {(gatingReason === 'score' || gatingReason === 'both') && (
+        <div style={{
+          background: '#fff',
+          padding: '20px',
+          borderRadius: '12px',
+          maxWidth: '400px',
+          margin: '0 auto 30px',
+          boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px', marginBottom: '15px' }}>
+            <div style={{
+              width: '60px',
+              height: '60px',
+              borderRadius: '50%',
+              background: onboardingScore >= 50 ? '#fef3c7' : '#fee2e2',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '1.25rem',
+              fontWeight: 'bold',
+              color: onboardingScore >= 50 ? '#f59e0b' : '#ef4444'
+            }}>
+              {onboardingScore}%
+            </div>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontWeight: '600', color: '#1e293b' }}>Current Score</div>
+              <div style={{ color: '#64748b', fontSize: '0.875rem' }}>
+                Need {MARKETPLACE_THRESHOLD - onboardingScore}% more to unlock
+              </div>
+            </div>
+          </div>
+
+          <div style={{
+            background: '#f1f5f9',
+            height: '8px',
+            borderRadius: '4px',
+            overflow: 'hidden'
+          }}>
+            <div style={{
+              width: `${onboardingScore}%`,
+              height: '100%',
+              background: onboardingScore >= 50 ? '#f59e0b' : '#ef4444',
+              borderRadius: '4px',
+              transition: 'width 0.5s ease'
+            }}></div>
+          </div>
+        </div>
+        )}
+
+        {nextActions.length > 0 && (
+          <div style={{ textAlign: 'left', maxWidth: '400px', margin: '0 auto' }}>
+            <h4 style={{ color: '#1e293b', marginBottom: '10px' }}>
+              <i className="fa-solid fa-list-check" style={{ marginRight: '8px', color: '#3b82f6' }}></i>
+              Complete These Steps:
+            </h4>
+            <ul style={{ listStyle: 'none', padding: 0 }}>
+              {nextActions.slice(0, 3).map((action, index) => (
+                <li key={index} style={{
+                  padding: '10px 15px',
+                  background: '#fff',
+                  borderRadius: '8px',
+                  marginBottom: '8px',
+                  border: '1px solid #e2e8f0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px'
+                }}>
+                  <span style={{
+                    width: '24px',
+                    height: '24px',
+                    background: '#3b82f6',
+                    color: '#fff',
+                    borderRadius: '50%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '0.75rem',
+                    fontWeight: 'bold'
+                  }}>
+                    {index + 1}
+                  </span>
+                  <span style={{ color: '#475569' }}>{action}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <button
+          onClick={() => window.location.href = '/carrier-dashboard'}
+          style={{
+            marginTop: '30px',
+            padding: '12px 24px',
+            background: '#3b82f6',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '8px',
+            fontWeight: '600',
+            cursor: 'pointer',
+            fontSize: '1rem'
+          }}
+        >
+          <i className="fa-solid fa-arrow-left" style={{ marginRight: '8px' }}></i>
+          Go to Dashboard
+        </button>
+      </div>
+    )
+  }
 
   // Mock drivers data
   const drivers = [
