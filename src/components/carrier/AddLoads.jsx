@@ -5,6 +5,7 @@ export default function AddLoads({ onClose }) {
   const [step, setStep] = useState(1);
   const [chargeName, setChargeName] = useState('');
   const [chargeAmount, setChargeAmount] = useState('');
+  const [loadId] = useState(`FP-${Math.floor(Math.random() * 10000)}-ATL-${String(Math.floor(Math.random() * 1000000)).padStart(6, '0')}`);
   const [formData, setFormData] = useState({
     // Step 1: Route & Equipment
     origin: '',
@@ -77,16 +78,36 @@ export default function AddLoads({ onClose }) {
     }));
   };
 
+  const calculateTotalPay = () => {
+    const linehaul = parseFloat(formData.linehaul) || 0;
+    const fuelSurcharge = parseFloat(formData.fuelSurcharge) || 0;
+    const advancedTotal = formData.advancedCharges.reduce((sum, charge) => {
+      return sum + (parseFloat(charge.amount) || 0);
+    }, 0);
+    return linehaul + fuelSurcharge + advancedTotal;
+  };
+
   const handleNext = () => {
-    if (step < 3) setStep(step + 1);
+    if (step < 4) setStep(step + 1);
   };
 
   const handleBack = () => {
     if (step > 1) setStep(step - 1);
   };
 
-  const handlePostLoad = () => {
+  const handleReviewLoad = () => {
+    setStep(4); // Go to confirmation screen
+  };
+
+  const handleFinalPostLoad = () => {
     console.log('Load posted with data:', formData);
+    // Here you would make API call to post the load
+    onClose();
+  };
+
+  const handleSaveDraft = () => {
+    console.log('Draft saved:', formData);
+    // Here you would save as draft
     onClose();
   };
 
@@ -550,7 +571,144 @@ export default function AddLoads({ onClose }) {
 
                 <div className="step-actions">
                   <button className="btn small ghost-cd" onClick={handleBack}>← Back</button>
-                  <button className="btn small-cd" onClick={handlePostLoad}>Post Load</button>
+                  <button className="btn small-cd" onClick={handleReviewLoad}>Review & Confirm</button>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 4: Review & Confirm */}
+            {step === 4 && (
+              <div className="add-loads-step">
+                <div className="review-confirm-header">
+                  <h2>Review & Confirm Load</h2>
+                  <p className="load-id-text">Load ID: {loadId}</p>
+                </div>
+
+                <div className="success-banner">
+                  <svg className="success-icon" width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <circle cx="10" cy="10" r="10" fill="#10b981"/>
+                    <path d="M6 10l2 2 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                  <span>Everything is ready. Review carefully before posting.</span>
+                </div>
+
+                <div className="confirmation-grid">
+                  {/* Route Summary */}
+                  <div className="confirm-card">
+                    <h3 className="confirm-card-title">Route Summary</h3>
+                    <p className="confirm-card-subtitle">Pickup & delivery details</p>
+                    
+                    <div className="confirm-detail-row">
+                      <div className="confirm-detail-col">
+                        <label className="confirm-label">Origin</label>
+                        <p className="confirm-value">{formData.origin || '—'}</p>
+                      </div>
+                      <div className="confirm-detail-col">
+                        <label className="confirm-label">Destination</label>
+                        <p className="confirm-value">{formData.destination || '—'}</p>
+                      </div>
+                    </div>
+
+                    <div className="confirm-detail-row">
+                      <div className="confirm-detail-col">
+                        <label className="confirm-label">Pickup Date</label>
+                        <p className="confirm-value">{formData.pickupDate || '—'}</p>
+                      </div>
+                      <div className="confirm-detail-col">
+                        <label className="confirm-label">Delivery Date</label>
+                        <p className="confirm-value">{formData.deliveryDate || '—'}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Pricing Summary */}
+                  <div className="confirm-card">
+                    <h3 className="confirm-card-title">Pricing Summary</h3>
+                    <p className="confirm-card-subtitle">Carrier compensation</p>
+                    
+                    <div className="pricing-breakdown">
+                      <div className="pricing-row">
+                        <span>Linehaul</span>
+                        <span className="pricing-amount">${formData.linehaul || '0'}</span>
+                      </div>
+                      <div className="pricing-row">
+                        <span>Fuel Surcharge</span>
+                        <span className="pricing-amount">${formData.fuelSurcharge || '0'}</span>
+                      </div>
+                      {formData.advancedCharges.map((charge, idx) => (
+                        <div key={idx} className="pricing-row">
+                          <span>{charge.name}</span>
+                          <span className="pricing-amount">${charge.amount}</span>
+                        </div>
+                      ))}
+                      <div className="pricing-divider"></div>
+                      <div className="pricing-row pricing-total">
+                        <span>Total Pay</span>
+                        <span className="pricing-amount">${calculateTotalPay().toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Equipment & Freight */}
+                <div className="confirm-card full-width">
+                  <h3 className="confirm-card-title">Equipment & Freight</h3>
+                  <p className="confirm-card-subtitle">Load configuration</p>
+                  
+                  <div className="confirm-detail-row">
+                    <div className="confirm-detail-col">
+                      <label className="confirm-label">Equipment</label>
+                      <p className="confirm-value">{formData.equipmentType} - {formData.loadType}</p>
+                    </div>
+                    <div className="confirm-detail-col">
+                      <label className="confirm-label">Weight</label>
+                      <p className="confirm-value">{formData.weight ? `${formData.weight} lbs` : '—'}</p>
+                    </div>
+                  </div>
+
+                  {formData.palletCount && (
+                    <div className="confirm-detail-row">
+                      <div className="confirm-detail-col">
+                        <label className="confirm-label">Pallets</label>
+                        <p className="confirm-value">{formData.palletCount}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Posting & Booking */}
+                <div className="confirm-card full-width" style={{marginTop: '20px'}}>
+                  <h3 className="confirm-card-title">Posting & Booking</h3>
+                  <p className="confirm-card-subtitle">Visibility & automation</p>
+                  
+                  <div className="posting-tags">
+                    <span className="posting-tag">
+                      {formData.visibility === 'public' ? ' Public Marketplace' : 
+                       formData.visibility === 'network' ? ' My Network' : 
+                       ' Private'}
+                    </span>
+                    {formData.autoMatch && (
+                      <span className="posting-tag"> Auto-Match On</span>
+                    )}
+                    {formData.postToLoadBoards && (
+                      <span className="posting-tag"> Load Boards Enabled</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Driver Instructions */}
+                <div className="confirm-card full-width" style={{marginTop: '20px'}}>
+                  <h3 className="confirm-card-title">Driver Instructions</h3>
+                  <p className="confirm-card-subtitle">Visible after booking</p>
+                  
+                  <p className="driver-instructions-text">
+                    {formData.driverInstructions || 'No special instructions provided.'}
+                  </p>
+                </div>
+
+                <div className="confirm-actions">
+                  <button className="btn small ghost-cd" onClick={handleSaveDraft}>Save Draft</button>
+                  <button className="btn small-cd" onClick={handleFinalPostLoad}>Post Load</button>
                 </div>
               </div>
             )}

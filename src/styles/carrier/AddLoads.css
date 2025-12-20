@@ -1053,3 +1053,290 @@
 .dark-root .add-loads-container::-webkit-scrollbar-thumb:hover {
   background: #475569;
 }
+
+/* Review & Confirm Screen */
+.review-confirm-header {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e6eef0;
+}
+
+.dark-root .review-confirm-header {
+  border-bottom: 1px solid #353535;
+}
+
+.review-confirm-header h2 {
+  margin: 0 0 6px 0;
+  font-size: clamp(22px, 2.5vw, 26px);
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.dark-root .review-confirm-header h2 {
+  color: #fff;
+}
+
+.load-id-text {
+  margin: 0;
+  font-size: 14px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.dark-root .load-id-text {
+  color: #94a3b8;
+}
+
+/* Success Banner */
+.success-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  border: 1px solid #a7f3d0;
+  border-radius: 10px;
+  margin-bottom: 24px;
+  font-size: 14px;
+  color: #065f46;
+  font-weight: 500;
+}
+
+.dark-root .success-banner {
+  background: linear-gradient(135deg, #064e3b 0%, #065f46 100%);
+  border: 1px solid #047857;
+  color: #d1fae5;
+}
+
+.success-icon {
+  flex-shrink: 0;
+}
+
+/* Confirmation Grid */
+.confirmation-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 768px) {
+  .confirmation-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Confirm Card */
+.confirm-card {
+  background: #f8fafc;
+  border: 1px solid #e6eef0;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.dark-root .confirm-card {
+  background: #2c2c2c;
+  border: 1px solid #353535;
+}
+
+.confirm-card.full-width {
+  grid-column: 1 / -1;
+}
+
+.confirm-card-title {
+  margin: 0 0 4px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.dark-root .confirm-card-title {
+  color: #fff;
+}
+
+.confirm-card-subtitle {
+  margin: 0 0 16px 0;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.dark-root .confirm-card-subtitle {
+  color: #94a3b8;
+}
+
+/* Confirm Detail Rows */
+.confirm-detail-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.confirm-detail-row:last-child {
+  margin-bottom: 0;
+}
+
+@media (max-width: 640px) {
+  .confirm-detail-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}
+
+.confirm-detail-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.confirm-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.dark-root .confirm-label {
+  color: #94a3b8;
+}
+
+.confirm-value {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.dark-root .confirm-value {
+  color: #e2e8f0;
+}
+
+/* Pricing Breakdown */
+.pricing-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pricing-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  color: #475569;
+}
+
+.dark-root .pricing-row {
+  color: #cbd5e1;
+}
+
+.pricing-amount {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.dark-root .pricing-amount {
+  color: #e2e8f0;
+}
+
+.pricing-divider {
+  height: 1px;
+  background: #e6eef0;
+  margin: 4px 0;
+}
+
+.dark-root .pricing-divider {
+  background: #353535;
+}
+
+.pricing-total {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+  padding-top: 4px;
+}
+
+.dark-root .pricing-total {
+  color: #fff;
+}
+
+.pricing-total .pricing-amount {
+  font-size: 18px;
+  color: #10b981;
+}
+
+.dark-root .pricing-total .pricing-amount {
+  color: #34d399;
+}
+
+/* Posting Tags */
+.posting-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.posting-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #475569;
+}
+
+.dark-root .posting-tag {
+  background: #2c2c2c;
+  border: 1px solid #353535;
+  color: #cbd5e1;
+}
+
+/* Driver Instructions */
+.driver-instructions-text {
+  margin: 0;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid #e6eef0;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #475569;
+  white-space: pre-wrap;
+}
+
+.dark-root .driver-instructions-text {
+  background: #2c2c2c;
+  border: 1px solid #353535;
+  color: #cbd5e1;
+}
+
+/* Confirm Actions */
+.confirm-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 28px;
+  padding-top: 24px;
+}
+
+.confirm-actions .btn {
+  flex: 1;
+  padding: 14px 24px;
+}
+
+@media (max-width: 640px) {
+  .confirm-actions {
+    flex-direction: column;
+  }
+  
+  .confirm-card {
+    padding: 16px;
+  }
+  
+  .review-confirm-header h2 {
+    font-size: 20px;
+  }
+}
