@@ -39,6 +39,8 @@ if TYPE_CHECKING:  # pragma: NO COVER
     from google.cloud.firestore_v1.query_profile import ExplainMetrics
     from google.cloud.firestore_v1.query_profile import ExplainOptions
 
+    import datetime
+
 
 class AggregationQuery(BaseAggregationQuery):
     """Represents an aggregation query to the Firestore API."""
@@ -56,6 +58,7 @@ class AggregationQuery(BaseAggregationQuery):
         timeout: float | None = None,
         *,
         explain_options: Optional[ExplainOptions] = None,
+        read_time: Optional[datetime.datetime] = None,
     ) -> QueryResultsList[AggregationResult]:
         """Runs the aggregation query.
 
@@ -64,8 +67,7 @@ class AggregationQuery(BaseAggregationQuery):
         messages.
 
         Args:
-            transaction
-                (Optional[:class:`~google.cloud.firestore_v1.transaction.Transaction`]):
+            transaction (Optional[:class:`~google.cloud.firestore_v1.transaction.Transaction`]):
                 An existing transaction that this query will run in.
                 If a ``transaction`` is used and it already has write operations
                 added, this method cannot be used (i.e. read-after-write is not
@@ -74,10 +76,13 @@ class AggregationQuery(BaseAggregationQuery):
                 should be retried.  Defaults to a system-specified policy.
             timeout (float): The timeout for this request.  Defaults to a
                 system-specified value.
-            explain_options
-                (Optional[:class:`~google.cloud.firestore_v1.query_profile.ExplainOptions`]):
+            explain_options (Optional[:class:`~google.cloud.firestore_v1.query_profile.ExplainOptions`]):
                 Options to enable query profiling for this query. When set,
                 explain_metrics will be available on the returned generator.
+            read_time (Optional[datetime.datetime]): If set, reads documents as they were at the given
+                time. This must be a timestamp within the past one hour, or if Point-in-Time Recovery
+                is enabled, can additionally be a whole minute timestamp within the past 7 days. If no
+                timezone is specified in the :class:`datetime.datetime` object, it is assumed to be UTC.
 
         Returns:
             QueryResultsList[AggregationResult]: The aggregation query results.
@@ -90,6 +95,7 @@ class AggregationQuery(BaseAggregationQuery):
             retry=retry,
             timeout=timeout,
             explain_options=explain_options,
+            read_time=read_time,
         )
         result_list = list(result)
 
@@ -100,13 +106,16 @@ class AggregationQuery(BaseAggregationQuery):
 
         return QueryResultsList(result_list, explain_options, explain_metrics)
 
-    def _get_stream_iterator(self, transaction, retry, timeout, explain_options=None):
+    def _get_stream_iterator(
+        self, transaction, retry, timeout, explain_options=None, read_time=None
+    ):
         """Helper method for :meth:`stream`."""
         request, kwargs = self._prep_stream(
             transaction,
             retry,
             timeout,
             explain_options,
+            read_time,
         )
 
         return self._client._firestore_api.run_aggregation_query(
@@ -132,6 +141,7 @@ class AggregationQuery(BaseAggregationQuery):
         retry: Union[retries.Retry, None, object] = gapic_v1.method.DEFAULT,
         timeout: Optional[float] = None,
         explain_options: Optional[ExplainOptions] = None,
+        read_time: Optional[datetime.datetime] = None,
     ) -> Generator[List[AggregationResult], Any, Optional[ExplainMetrics]]:
         """Internal method for stream(). Runs the aggregation query.
 
@@ -143,18 +153,20 @@ class AggregationQuery(BaseAggregationQuery):
         this method cannot be used (i.e. read-after-write is not allowed).
 
         Args:
-            transaction
-                (Optional[:class:`~google.cloud.firestore_v1.transaction.Transaction`]):
+            transaction (Optional[:class:`~google.cloud.firestore_v1.transaction.Transaction`]):
                 An existing transaction that this query will run in.
             retry (Optional[google.api_core.retry.Retry]): Designation of what
                 errors, if any, should be retried.  Defaults to a
                 system-specified policy.
             timeout (Optional[float]): The timeout for this request.  Defaults
                 to a system-specified value.
-            explain_options
-                (Optional[:class:`~google.cloud.firestore_v1.query_profile.ExplainOptions`]):
+            explain_options (Optional[:class:`~google.cloud.firestore_v1.query_profile.ExplainOptions`]):
                 Options to enable query profiling for this query. When set,
                 explain_metrics will be available on the returned generator.
+            read_time (Optional[datetime.datetime]): If set, reads documents as they were at the given
+                time. This must be a timestamp within the past one hour, or if Point-in-Time Recovery
+                is enabled, can additionally be a whole minute timestamp within the past 7 days. If no
+                timezone is specified in the :class:`datetime.datetime` object, it is assumed to be UTC.
 
         Yields:
             List[AggregationResult]:
@@ -172,6 +184,7 @@ class AggregationQuery(BaseAggregationQuery):
             retry,
             timeout,
             explain_options,
+            read_time,
         )
         while True:
             try:
@@ -182,6 +195,8 @@ class AggregationQuery(BaseAggregationQuery):
                         transaction,
                         retry,
                         timeout,
+                        explain_options,
+                        read_time,
                     )
                     continue
                 else:
@@ -206,6 +221,7 @@ class AggregationQuery(BaseAggregationQuery):
         timeout: Optional[float] = None,
         *,
         explain_options: Optional[ExplainOptions] = None,
+        read_time: Optional[datetime.datetime] = None,
     ) -> StreamGenerator[List[AggregationResult]]:
         """Runs the aggregation query.
 
@@ -217,18 +233,20 @@ class AggregationQuery(BaseAggregationQuery):
         this method cannot be used (i.e. read-after-write is not allowed).
 
         Args:
-            transaction
-                (Optional[:class:`~google.cloud.firestore_v1.transaction.Transaction`]):
+            transaction (Optional[:class:`~google.cloud.firestore_v1.transaction.Transaction`]):
                 An existing transaction that this query will run in.
             retry (Optional[google.api_core.retry.Retry]): Designation of what
                 errors, if any, should be retried.  Defaults to a
                 system-specified policy.
             timeout (Optinal[float]): The timeout for this request.  Defaults
             to a system-specified value.
-            explain_options
-                (Optional[:class:`~google.cloud.firestore_v1.query_profile.ExplainOptions`]):
+            explain_options (Optional[:class:`~google.cloud.firestore_v1.query_profile.ExplainOptions`]):
                 Options to enable query profiling for this query. When set,
                 explain_metrics will be available on the returned generator.
+            read_time (Optional[datetime.datetime]): If set, reads documents as they were at the given
+                time. This must be a timestamp within the past one hour, or if Point-in-Time Recovery
+                is enabled, can additionally be a whole minute timestamp within the past 7 days. If no
+                timezone is specified in the :class:`datetime.datetime` object, it is assumed to be UTC.
 
         Returns:
             `StreamGenerator[List[AggregationResult]]`:
@@ -239,5 +257,6 @@ class AggregationQuery(BaseAggregationQuery):
             retry=retry,
             timeout=timeout,
             explain_options=explain_options,
+            read_time=read_time,
         )
         return StreamGenerator(inner_generator, explain_options)

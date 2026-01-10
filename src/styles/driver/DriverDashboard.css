@@ -1,3 +1,6 @@
+/* Import carrier dashboard CSS for layout structure */
+@import '../carrier/CarrierDashboard.css';
+
 .dd-service-item i {
   font-size: 2.2rem;
   margin-bottom: 0.5rem;
@@ -553,8 +556,6 @@ input:not(:checked) + .dd-toggle-slider:before {
   color: #fff;
 }
 /* Driver Dashboard content styles with dd- prefix - uses carrier dashboard layout structure */
-/* Import carrier dashboard CSS for layout structure */
-@import '../carrier/CarrierDashboard.css';
 
 .dd-dark-root .dd-muted,
 .dd-dark-root .dd-nav-item,

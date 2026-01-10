@@ -1,8 +1,10 @@
 # File: apps/api/auth.py
-from fastapi import APIRouter, HTTPException, Header, Depends, Body, status
+from fastapi import APIRouter, HTTPException, Header, Depends, Body, status, UploadFile, File
 from firebase_admin import auth as firebase_auth
+import firebase_admin
 import time
 import json
+import uuid
 from typing import Optional, Dict, Any
 from functools import wraps
 
@@ -172,8 +174,50 @@ async def signup(user: UserSignup):
 
         # 3. Save to Firestore with proper schema
         db.collection("users").document(user_record.uid).set(user_data)
+        
+        # 4. Create role-specific profile records
+        if user.role.value == "carrier":
+            # Create carrier profile for marketplace visibility
+            carrier_profile = {
+                "id": user_record.uid,
+                "carrier_id": user_record.uid,
+                "name": user.company_name or user.name,
+                "email": user.email,
+                "phone": user.phone or None,
+                "mc_number": None,
+                "dot_number": None,
+                "equipment_types": [],
+                "service_areas": [],
+                "rating": 0,
+                "total_loads": 0,
+                "status": "active",
+                "created_at": time.time(),
+                "updated_at": time.time()
+            }
+            db.collection("carriers").document(user_record.uid).set(carrier_profile)
+            log_action(user_record.uid, "CARRIER_PROFILE_CREATED", "Carrier profile created in marketplace")
+        
+        elif user.role.value == "driver":
+            # Create driver profile for carrier marketplace
+            driver_profile = {
+                "id": user_record.uid,
+                "driver_id": user_record.uid,
+                "name": user.name,
+                "email": user.email,
+                "phone": user.phone or None,
+                "cdl_class": None,
+                "cdl_number": None,
+                "status": "available",
+                "current_location": None,
+                "rating": 0,
+                "total_deliveries": 0,
+                "created_at": time.time(),
+                "updated_at": time.time()
+            }
+            db.collection("drivers").document(user_record.uid).set(driver_profile)
+            log_action(user_record.uid, "DRIVER_PROFILE_CREATED", "Driver profile created in marketplace")
 
-        # 4. Audit log
+        # 5. Audit log
         log_action(user_record.uid, "SIGNUP", f"User signed up as {user.role.value}")
 
         return SignupResponse(
@@ -190,8 +234,14 @@ async def signup(user: UserSignup):
         raise HTTPException(status_code=400, detail="Email already registered")
     except firebase_auth.PhoneNumberAlreadyExistsError:
         raise HTTPException(status_code=400, detail="Phone number already registered")
+    except firebase_admin.exceptions.FirebaseError as e:
+        # Handle Firebase Admin SDK errors properly
+        error_msg = str(e) if hasattr(e, '__str__') else "Firebase authentication error"
+        raise HTTPException(status_code=500, detail=f"Signup failed: {error_msg}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Signup failed: {str(e)}")
+        # Generic error handler
+        error_msg = str(e) if str(e) else "Unknown error occurred"
+        raise HTTPException(status_code=500, detail=f"Signup failed: {error_msg}")
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -305,7 +355,29 @@ async def toggle_mfa(
 @router.get("/me", response_model=UserProfile)
 async def get_current_user_profile(user: Dict[str, Any] = Depends(get_current_user)):
     """Get current user profile."""
-    return UserProfile(**user)
+    # Ensure all required fields exist with defaults
+    profile_data = {
+        "uid": user.get("uid", ""),
+        "email": user.get("email", ""),
+        "name": user.get("name") or user.get("full_name") or user.get("email", "").split("@")[0],
+        "phone": user.get("phone"),
+        "role": Role(user.get("role", "carrier")),
+        "company_name": user.get("company_name"),
+        "dot_number": user.get("dot_number"),
+        "mc_number": user.get("mc_number"),
+        "is_verified": user.get("is_verified", False),
+        "mfa_enabled": user.get("mfa_enabled", False),
+        "onboarding_completed": user.get("onboarding_completed", False),
+        "onboarding_step": user.get("onboarding_step", "WELCOME"),
+        "onboarding_score": user.get("onboarding_score", 0),
+        "created_at": user.get("created_at"),
+        "profile_picture_url": user.get("profile_picture_url"),
+        "address": user.get("address"),
+        "emergency_contact_name": user.get("emergency_contact_name"),
+        "emergency_contact_relationship": user.get("emergency_contact_relationship"),
+        "emergency_contact_phone": user.get("emergency_contact_phone"),
+    }
+    return UserProfile(**profile_data)
 
 
 @router.post("/profile/update")
@@ -323,6 +395,68 @@ async def update_profile(
         log_action(uid, "PROFILE_UPDATE", f"Updated fields: {list(update_data.keys())}")
     
     return {"status": "success", "message": "Profile updated"}
+
+
+@router.post("/profile/picture")
+async def upload_profile_picture(
+    file: UploadFile = File(...),
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Upload profile picture and update user profile."""
+    from .database import bucket
+    
+    uid = user['uid']
+    
+    # Validate file type (images only)
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+    
+    file_ext = file.filename.lower().split('.')[-1]
+    allowed_extensions = ['jpg', 'jpeg', 'png', 'gif', 'webp']
+    
+    if file_ext not in allowed_extensions:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}"
+        )
+    
+    # Validate file size (max 5MB)
+    file_data = await file.read()
+    if len(file_data) > 5 * 1024 * 1024:  # 5MB
+        raise HTTPException(status_code=400, detail="File size must be less than 5MB")
+    
+    try:
+        # Upload to Firebase Storage
+        picture_id = str(uuid.uuid4())
+        storage_path = f"profile_pictures/{uid}/{picture_id}.{file_ext}"
+        blob = bucket.blob(storage_path)
+        
+        # Determine content type
+        content_type = f"image/{file_ext}" if file_ext != 'jpg' else "image/jpeg"
+        
+        blob.upload_from_string(file_data, content_type=content_type)
+        blob.make_public()
+        download_url = blob.public_url
+        
+        # Update user profile with picture URL
+        db.collection("users").document(uid).update({
+            "profile_picture_url": download_url,
+            "updated_at": time.time()
+        })
+        
+        log_action(uid, "PROFILE_PICTURE_UPLOAD", f"Profile picture uploaded: {storage_path}")
+        
+        return {
+            "status": "success",
+            "message": "Profile picture uploaded successfully",
+            "profile_picture_url": download_url
+        }
+    except Exception as e:
+        print(f"Error uploading profile picture: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to upload profile picture: {str(e)}"
+        )
 
 
 @router.post("/log-login")

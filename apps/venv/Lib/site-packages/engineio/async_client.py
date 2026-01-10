@@ -1,4 +1,6 @@
 import asyncio
+from http.cookies import SimpleCookie
+import inspect
 import signal
 import ssl
 import threading
@@ -319,16 +321,16 @@ class AsyncClient(base_client.BaseClient):
 
         # extract any new cookies passed in a header so that they can also be
         # sent the the WebSocket route
-        cookies = {}
         for header, value in headers.items():
             if header.lower() == 'cookie':
-                cookies = dict(
-                    [cookie.split('=', 1) for cookie in value.split('; ')])
+                ck = SimpleCookie(headers[header])
+                self.http.cookie_jar.update_cookies(
+                    {k: m.value for k, m in ck.items()})
                 del headers[header]
                 break
-        self.http.cookie_jar.update_cookies(cookies)
 
-        extra_options = {'timeout': self.request_timeout}
+        extra_options = {
+            'timeout': aiohttp.ClientWSTimeout(ws_close=self.request_timeout)}
         if not self.ssl_verify:
             ssl_context = ssl.create_default_context()
             ssl_context.check_hostname = False
@@ -468,7 +470,7 @@ class AsyncClient(base_client.BaseClient):
         run_async = kwargs.pop('run_async', False)
         ret = None
         if event in self.handlers:
-            if asyncio.iscoroutinefunction(self.handlers[event]) is True:
+            if inspect.iscoroutinefunction(self.handlers[event]) is True:
                 if run_async:
                     task = self.start_background_task(self.handlers[event],
                                                       *args)

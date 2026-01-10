@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import copy
+
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -36,6 +37,8 @@ from google.cloud.firestore_v1.types import common
 # Types needed only for Type Hints
 if TYPE_CHECKING:  # pragma: NO COVER
     from google.cloud.firestore_v1.types import Document, firestore, write
+
+    import datetime
 
 
 class BaseDocumentReference(object):
@@ -290,6 +293,7 @@ class BaseDocumentReference(object):
         transaction=None,
         retry: retries.Retry | retries.AsyncRetry | None | object = None,
         timeout: float | None = None,
+        read_time: datetime.datetime | None = None,
     ) -> Tuple[dict, dict]:
         """Shared setup for async/sync :meth:`get`."""
         if isinstance(field_paths, str):
@@ -306,6 +310,8 @@ class BaseDocumentReference(object):
             "mask": mask,
             "transaction": _helpers.get_transaction_id(transaction),
         }
+        if read_time is not None:
+            request["read_time"] = read_time
         kwargs = _helpers.make_retry_timeout_kwargs(retry, timeout)
 
         return request, kwargs
@@ -316,6 +322,8 @@ class BaseDocumentReference(object):
         transaction=None,
         retry: retries.Retry | retries.AsyncRetry | None | object = None,
         timeout: float | None = None,
+        *,
+        read_time: datetime.datetime | None = None,
     ) -> "DocumentSnapshot" | Awaitable["DocumentSnapshot"]:
         raise NotImplementedError
 
@@ -324,9 +332,15 @@ class BaseDocumentReference(object):
         page_size: int | None = None,
         retry: retries.Retry | retries.AsyncRetry | None | object = None,
         timeout: float | None = None,
+        read_time: datetime.datetime | None = None,
     ) -> Tuple[dict, dict]:
         """Shared setup for async/sync :meth:`collections`."""
-        request = {"parent": self._document_path, "page_size": page_size}
+        request = {
+            "parent": self._document_path,
+            "page_size": page_size,
+        }
+        if read_time is not None:
+            request["read_time"] = read_time
         kwargs = _helpers.make_retry_timeout_kwargs(retry, timeout)
 
         return request, kwargs
@@ -336,6 +350,8 @@ class BaseDocumentReference(object):
         page_size: int | None = None,
         retry: retries.Retry | retries.AsyncRetry | None | object = None,
         timeout: float | None = None,
+        *,
+        read_time: datetime.datetime | None = None,
     ):
         raise NotImplementedError
 
@@ -402,7 +418,7 @@ class DocumentSnapshot(object):
         return self._reference._client
 
     @property
-    def exists(self):
+    def exists(self) -> bool:
         """Existence flag.
 
         Indicates if the document existed at the time this snapshot
@@ -414,7 +430,7 @@ class DocumentSnapshot(object):
         return self._exists
 
     @property
-    def id(self):
+    def id(self) -> str:
         """The document identifier (within its collection).
 
         Returns:
@@ -423,7 +439,7 @@ class DocumentSnapshot(object):
         return self._reference.id
 
     @property
-    def reference(self):
+    def reference(self) -> BaseDocumentReference:
         """Document reference corresponding to document that owns this data.
 
         Returns:

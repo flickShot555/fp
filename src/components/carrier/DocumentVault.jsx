@@ -51,7 +51,7 @@ function RowActions({ doc, onRefresh }) {
   }, [open]);
 
   const handleView = () => {
-    // Open document in new tab if URL available, or show modal with details
+    // Open Firebase Storage URL directly in new tab
     if (doc.file_url) {
       window.open(doc.file_url, '_blank');
     } else {
@@ -60,10 +60,12 @@ function RowActions({ doc, onRefresh }) {
   };
 
   const handleDownload = () => {
+    // Direct download from Firebase Storage URL
     if (doc.file_url) {
       const link = document.createElement('a');
       link.href = doc.file_url;
       link.download = doc.file_name || doc.name || 'document.pdf';
+      link.target = '_blank';
       link.click();
     } else {
       alert('Download URL not available. Please contact support.');
@@ -179,7 +181,11 @@ export default function DocumentVault() {
       });
       if (response.ok) {
         const data = await response.json();
+        console.log('📊 Compliance Score Data:', data);
+        console.log('📄 Documents:', data.documents);
         setComplianceScore(data);
+      } else {
+        console.error('Failed to fetch compliance score:', response.status);
       }
     } catch (error) {
       console.error('Error fetching compliance:', error);

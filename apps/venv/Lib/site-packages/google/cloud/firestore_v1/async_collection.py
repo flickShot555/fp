@@ -15,14 +15,13 @@
 """Classes for representing collections for the Google Cloud Firestore API."""
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional, Tuple
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional, Tuple, cast
 
 from google.api_core import gapic_v1
 from google.api_core import retry_async as retries
 
 from google.cloud.firestore_v1 import (
     async_aggregation,
-    async_document,
     async_query,
     async_vector_query,
     transaction,
@@ -31,9 +30,10 @@ from google.cloud.firestore_v1.base_collection import (
     BaseCollectionReference,
     _item_to_document_ref,
 )
-from google.cloud.firestore_v1.document import DocumentReference
 
 if TYPE_CHECKING:  # pragma: NO COVER
+    import datetime
+    from google.cloud.firestore_v1.async_document import AsyncDocumentReference
     from google.cloud.firestore_v1.async_stream_generator import AsyncStreamGenerator
     from google.cloud.firestore_v1.base_document import DocumentSnapshot
     from google.cloud.firestore_v1.query_profile import ExplainOptions
@@ -140,9 +140,7 @@ class AsyncCollectionReference(BaseCollectionReference[async_query.AsyncQuery]):
         write_result = await document_ref.create(document_data, **kwargs)
         return write_result.update_time, document_ref
 
-    def document(
-        self, document_id: str | None = None
-    ) -> async_document.AsyncDocumentReference:
+    def document(self, document_id: str | None = None) -> AsyncDocumentReference:
         """Create a sub-document underneath the current collection.
 
         Args:
@@ -155,14 +153,17 @@ class AsyncCollectionReference(BaseCollectionReference[async_query.AsyncQuery]):
             :class:`~google.cloud.firestore_v1.document.async_document.AsyncDocumentReference`:
             The child document.
         """
-        return super(AsyncCollectionReference, self).document(document_id)
+        doc = super(AsyncCollectionReference, self).document(document_id)
+        return cast("AsyncDocumentReference", doc)
 
     async def list_documents(
         self,
         page_size: int | None = None,
         retry: retries.AsyncRetry | object | None = gapic_v1.method.DEFAULT,
         timeout: float | None = None,
-    ) -> AsyncGenerator[DocumentReference, None]:
+        *,
+        read_time: datetime.datetime | None = None,
+    ) -> AsyncGenerator[AsyncDocumentReference, None]:
         """List all subdocuments of the current collection.
 
         Args:
@@ -173,6 +174,10 @@ class AsyncCollectionReference(BaseCollectionReference[async_query.AsyncQuery]):
                 should be retried.  Defaults to a system-specified policy.
             timeout (float): The timeout for this request.  Defaults to a
                 system-specified value.
+            read_time (Optional[datetime.datetime]): If set, reads documents as they were at the given
+                time. This must be a timestamp within the past one hour, or if Point-in-Time Recovery
+                is enabled, can additionally be a whole minute timestamp within the past 7 days. If no
+                timezone is specified in the :class:`datetime.datetime` object, it is assumed to be UTC.
 
         Returns:
             Sequence[:class:`~google.cloud.firestore_v1.collection.DocumentReference`]:
@@ -180,7 +185,9 @@ class AsyncCollectionReference(BaseCollectionReference[async_query.AsyncQuery]):
                 collection does not exist at the time of `snapshot`, the
                 iterator will be empty
         """
-        request, kwargs = self._prep_list_documents(page_size, retry, timeout)
+        request, kwargs = self._prep_list_documents(
+            page_size, retry, timeout, read_time
+        )
 
         iterator = await self._client._firestore_api.list_documents(
             request=request,
@@ -197,6 +204,7 @@ class AsyncCollectionReference(BaseCollectionReference[async_query.AsyncQuery]):
         timeout: Optional[float] = None,
         *,
         explain_options: Optional[ExplainOptions] = None,
+        read_time: Optional[datetime.datetime] = None,
     ) -> QueryResultsList[DocumentSnapshot]:
         """Read the documents in this collection.
 
@@ -216,6 +224,10 @@ class AsyncCollectionReference(BaseCollectionReference[async_query.AsyncQuery]):
                 (Optional[:class:`~google.cloud.firestore_v1.query_profile.ExplainOptions`]):
                 Options to enable query profiling for this query. When set,
                 explain_metrics will be available on the returned generator.
+            read_time (Optional[datetime.datetime]): If set, reads documents as they were at the given
+                time. This must be a timestamp within the past one hour, or if Point-in-Time Recovery
+                is enabled, can additionally be a whole minute timestamp within the past 7 days. If no
+                timezone is specified in the :class:`datetime.datetime` object, it is assumed to be UTC.
 
         If a ``transaction`` is used and it already has write operations added,
         this method cannot be used (i.e. read-after-write is not allowed).
@@ -227,6 +239,8 @@ class AsyncCollectionReference(BaseCollectionReference[async_query.AsyncQuery]):
         query, kwargs = self._prep_get_or_stream(retry, timeout)
         if explain_options is not None:
             kwargs["explain_options"] = explain_options
+        if read_time is not None:
+            kwargs["read_time"] = read_time
 
         return await query.get(transaction=transaction, **kwargs)
 
@@ -237,6 +251,7 @@ class AsyncCollectionReference(BaseCollectionReference[async_query.AsyncQuery]):
         timeout: Optional[float] = None,
         *,
         explain_options: Optional[ExplainOptions] = None,
+        read_time: Optional[datetime.datetime] = None,
     ) -> AsyncStreamGenerator[DocumentSnapshot]:
         """Read the documents in this collection.
 
@@ -268,6 +283,10 @@ class AsyncCollectionReference(BaseCollectionReference[async_query.AsyncQuery]):
                 (Optional[:class:`~google.cloud.firestore_v1.query_profile.ExplainOptions`]):
                 Options to enable query profiling for this query. When set,
                 explain_metrics will be available on the returned generator.
+            read_time (Optional[datetime.datetime]): If set, reads documents as they were at the given
+                time. This must be a timestamp within the past one hour, or if Point-in-Time Recovery
+                is enabled, can additionally be a whole minute timestamp within the past 7 days. If no
+                timezone is specified in the :class:`datetime.datetime` object, it is assumed to be UTC.
 
         Returns:
             `AsyncStreamGenerator[DocumentSnapshot]`: A generator of the query
@@ -276,5 +295,7 @@ class AsyncCollectionReference(BaseCollectionReference[async_query.AsyncQuery]):
         query, kwargs = self._prep_get_or_stream(retry, timeout)
         if explain_options:
             kwargs["explain_options"] = explain_options
+        if read_time is not None:
+            kwargs["read_time"] = read_time
 
         return query.stream(transaction=transaction, **kwargs)

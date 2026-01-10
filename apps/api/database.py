@@ -1,5 +1,5 @@
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import credentials, firestore, storage
 import os
 
 # Initialize Firebase only once
@@ -12,9 +12,12 @@ if not firebase_admin._apps:
     service_account_path = os.path.join(apps_dir, "serviceAccountKey.json")
     
     cred = credentials.Certificate(service_account_path)
-    firebase_admin.initialize_app(cred)
+    firebase_admin.initialize_app(cred, {
+        'storageBucket': 'freightpowerai-e90fe.firebasestorage.app'
+    })
 
 db = firestore.client()
+bucket = storage.bucket()
 
 # Helper to log actions
 def log_action(user_id: str, action: str, details: str, ip: str = None):

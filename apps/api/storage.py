@@ -35,17 +35,77 @@ class ResponseStore:
     def save_load(self, load: Dict[str, Any]):
         data = self._read()
         loads = data.get("loads", {})
-        loads[load["id"]] = load
+        loads[load["id" if "id" in load else "load_id"]] = load
         data["loads"] = loads
         self._write(data)
 
     def get_load(self, load_id: str) -> Optional[Dict[str, Any]]:
         data = self._read()
         return data.get("loads", {}).get(load_id)
-
-    def list_loads(self) -> List[Dict[str, Any]]:
+    
+    def update_load(self, load_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Update an existing load with partial data."""
         data = self._read()
-        return list(data.get("loads", {}).values())
+        loads = data.get("loads", {})
+        if load_id not in loads:
+            return None
+        loads[load_id].update(updates)
+        data["loads"] = loads
+        self._write(data)
+        return loads[load_id]
+    
+    def delete_load(self, load_id: str) -> bool:
+        """Delete a load from storage. Returns True if deleted, False if not found."""
+        data = self._read()
+        loads = data.get("loads", {})
+        if load_id in loads:
+            del loads[load_id]
+            data["loads"] = loads
+            self._write(data)
+            return True
+        return False
+
+    def list_loads(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        data = self._read()
+        all_loads = list(data.get("loads", {}).values())
+        
+        if not filters:
+            return all_loads
+        
+        # Apply filters
+        filtered = all_loads
+        if "created_by" in filters:
+            filtered = [l for l in filtered if l.get("created_by") == filters["created_by"]]
+        if "status" in filters:
+            filtered = [l for l in filtered if l.get("status") == filters["status"]]
+        if "creator_role" in filters:
+            # Support both string and list for creator_role filtering
+            allowed_roles = filters["creator_role"]
+            if isinstance(allowed_roles, list):
+                filtered = [l for l in filtered if l.get("creator_role") in allowed_roles]
+            else:
+                filtered = [l for l in filtered if l.get("creator_role") == allowed_roles]
+        if "assigned_driver" in filters:
+            filtered = [l for l in filtered if l.get("assigned_driver") == filters["assigned_driver"]]
+        if "assigned_carrier" in filters:
+            filtered = [l for l in filtered if l.get("assigned_carrier") == filters["assigned_carrier"]]
+        
+        return filtered
+    
+    def add_status_change_log(self, load_id: str, log_entry: Dict[str, Any]) -> bool:
+        """Add a status change log entry to a load."""
+        data = self._read()
+        loads = data.get("loads", {})
+        if load_id not in loads:
+            return False
+        
+        if "status_change_logs" not in loads[load_id]:
+            loads[load_id]["status_change_logs"] = []
+        
+        loads[load_id]["status_change_logs"].append(log_entry)
+        data["loads"] = loads
+        self._write(data)
+        return True
 
     def save_carrier(self, carrier: Dict[str, Any]):
         data = self._read()
@@ -61,6 +121,114 @@ class ResponseStore:
     def list_carriers(self) -> List[Dict[str, Any]]:
         data = self._read()
         return list(data.get("carriers", {}).values())
+    
+    def list_shipper_carriers(self, shipper_id: str, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """List carriers associated with a specific shipper."""
+        data = self._read()
+        relationships = data.get("shipper_carrier_relationships", [])
+        
+        # Filter by shipper_id
+        shipper_rels = [r for r in relationships if r.get("shipper_id") == shipper_id]
+        
+        # Apply additional filters
+        if filters:
+            if "status" in filters:
+                shipper_rels = [r for r in shipper_rels if r.get("status") == filters["status"]]
+        
+        return shipper_rels
+    
+    def save_shipper_carrier_relationship(self, relationship: Dict[str, Any]):
+        """Save or update a shipper-carrier relationship."""
+        data = self._read()
+        relationships = data.get("shipper_carrier_relationships", [])
+        
+        # Check if relationship already exists
+        for i, rel in enumerate(relationships):
+            if (rel.get("shipper_id") == relationship.get("shipper_id") and 
+                rel.get("carrier_id") == relationship.get("carrier_id")):
+                # Update existing relationship
+                relationships[i] = relationship
+                data["shipper_carrier_relationships"] = relationships
+                self._write(data)
+                return
+        
+        # Add new relationship
+        relationships.append(relationship)
+        data["shipper_carrier_relationships"] = relationships
+        self._write(data)
+    
+    def save_carrier_invitation(self, invitation: Dict[str, Any]):
+        """Save a carrier invitation."""
+        data = self._read()
+        invitations = data.get("carrier_invitations", [])
+        invitations.append(invitation)
+        data["carrier_invitations"] = invitations
+        self._write(data)
+    
+    def get_carrier_invitation(self, invitation_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific carrier invitation."""
+        data = self._read()
+        invitations = data.get("carrier_invitations", [])
+        for inv in invitations:
+            if inv.get("id") == invitation_id:
+                return inv
+        return None
+    
+    def list_carrier_invitations(self, shipper_id: str, status: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List carrier invitations for a shipper."""
+        data = self._read()
+        invitations = data.get("carrier_invitations", [])
+        
+        # Filter by shipper_id
+        shipper_invs = [i for i in invitations if i.get("shipper_id") == shipper_id]
+        
+        # Filter by status if provided
+        if status:
+            shipper_invs = [i for i in shipper_invs if i.get("status") == status]
+        
+        return shipper_invs
+    
+    def list_carrier_invitations_by_carrier(self, carrier_id: str = None, carrier_email: str = None, status: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List invitations received by a carrier."""
+        data = self._read()
+        invitations = data.get("carrier_invitations", [])
+        
+        # Filter by carrier_id or carrier_email
+        carrier_invs = []
+        for i in invitations:
+            if carrier_id and i.get("carrier_id") == carrier_id:
+                carrier_invs.append(i)
+            elif carrier_email and i.get("carrier_email") == carrier_email:
+                carrier_invs.append(i)
+        
+        # Filter by status if provided
+        if status:
+            carrier_invs = [i for i in carrier_invs if i.get("status") == status]
+        
+        return carrier_invs
+    
+    def get_carrier_invitation_by_id(self, invitation_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific carrier invitation by ID."""
+        data = self._read()
+        invitations = data.get("carrier_invitations", [])
+        for inv in invitations:
+            if inv.get("id") == invitation_id:
+                return inv
+        return None
+    
+    def update_carrier_invitation(self, invitation_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Update a carrier invitation."""
+        data = self._read()
+        invitations = data.get("carrier_invitations", [])
+        
+        for i, inv in enumerate(invitations):
+            if inv.get("id") == invitation_id:
+                invitations[i].update(updates)
+                data["carrier_invitations"] = invitations
+                self._write(data)
+                return invitations[i]
+        
+        return None
 
     def save_assignment(self, assignment: Dict[str, Any]):
         data = self._read()

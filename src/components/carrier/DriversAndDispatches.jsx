@@ -1,79 +1,171 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import '../../styles/carrier/DriversAndDispatches.css';
+import { useAuth } from '../../contexts/AuthContext';
+import { API_URL } from '../../config';
 
 const DriversAndDispatches = () => {
+  const { currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState('directory');
   const [searchTerm, setSearchTerm] = useState('');
   const [cdlFilter, setCdlFilter] = useState('All CDL Types');
   const [availabilityFilter, setAvailabilityFilter] = useState('All Availability');
   const [locationFilter, setLocationFilter] = useState('All Locations');
+  const [drivers, setDrivers] = useState([]);
+  const [driversLoading, setDriversLoading] = useState(false);
+  const [availableLoads, setAvailableLoads] = useState([]);
+  const [loadsLoading, setLoadsLoading] = useState(false);
+  const [assigningLoad, setAssigningLoad] = useState(null);
 
-  // Mock driver data based on the screenshot
-  const drivers = [
-    {
-      id: 1,
-      name: 'John Martinez',
-      location: 'Houston, TX',
-      avatar: 'JM',
-      status: 'Available',
-      cdlClass: 'A',
-      endorsements: 'HazMat, Tanker',
-      medicalCard: 'Valid until 12/31/24',
-      equipment: 'Truck #5-67',
-      assignLoad: true
-    },
-    {
-      id: 2,
-      name: 'Sarah Johnson',
-      location: 'Houston, TX',
-      avatar: 'SJ',
-      status: 'Assigned',
-      cdlClass: 'A',
-      endorsements: 'Passenger, School Bus',
-      medicalCard: 'Expires 01/2025',
-      equipment: 'Truck #5-67',
-      assignLoad: false,
-      onRoute: true
-    },
-    {
-      id: 3,
-      name: 'Mike Thompson',
-      location: 'Dallas, TX',
-      avatar: 'MT',
-      status: 'Off Duty',
-      cdlClass: 'B',
-      endorsements: 'None',
-      medicalCard: 'Expired 12/2024',
-      equipment: 'Truck #0-89',
-      assignLoad: false,
-      offDuty: true
-    },
-    {
-      id: 4,
-      name: 'Lisa Chen',
-      location: 'San Antonio, TX',
-      avatar: 'LC',
-      status: 'Available',
-      cdlClass: 'A',
-      endorsements: 'Oversized/Triple HazMat',
-      medicalCard: 'Valid until 06/2025',
-      equipment: 'Truck #3-34',
-      assignLoad: true
-    },
-    {
-      id: 5,
-      name: 'Robert Davis',
-      location: 'Fort Worth, TX',
-      avatar: 'RD',
-      status: 'Assigned',
-      cdlClass: 'A',
-      endorsements: 'Truck, HazMat',
-      medicalCard: 'Valid until 08/2025',
-      equipment: 'Truck #5-67',
-      assignLoad: false,
-      onRoute: true
+  // Fetch hired drivers
+  const fetchMyDrivers = async () => {
+    if (!currentUser) return;
+
+    setDriversLoading(true);
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(`${API_URL}/drivers/my-drivers`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Format drivers for UI
+        const formattedDrivers = (data.drivers || []).map(driver => {
+          // Build endorsements string
+          const endorsementsList = []
+          if (driver.hazmat_endorsement) endorsementsList.push('HazMat')
+          if (driver.tanker_endorsement) endorsementsList.push('Tanker')
+          if (driver.doubles_triples) endorsementsList.push('Double/Triple')
+          if (driver.passenger_endorsement) endorsementsList.push('Passenger')
+          const endorsements = endorsementsList.length > 0 ? endorsementsList.join(', ') : 'None'
+
+          // Format medical card expiry
+          let medicalCard = 'Not provided'
+          if (driver.medical_card_expiry) {
+            const expiryDate = new Date(driver.medical_card_expiry.seconds * 1000 || driver.medical_card_expiry)
+            const now = new Date()
+            if (expiryDate > now) {
+              medicalCard = `Valid until ${expiryDate.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}`
+            } else {
+              medicalCard = `Expired ${expiryDate.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}`
+            }
+          }
+
+          return {
+            id: driver.id || driver.driver_id,
+            name: driver.name || 'Unknown Driver',
+            location: driver.current_location || driver.current_city || 'Unknown',
+            avatar: (driver.name || 'Driver').split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2),
+            status: driver.status === 'available' ? 'Available' : driver.status === 'assigned' ? 'Assigned' : driver.status === 'on_trip' ? 'On Route' : 'Off Duty',
+            cdlClass: driver.cdl_class || 'N/A',
+            endorsements: endorsements,
+            medicalCard: medicalCard,
+            equipment: 'Truck Assignment',
+            assignLoad: driver.status === 'available',
+            onRoute: driver.status === 'assigned' || driver.status === 'on_trip',
+            offDuty: driver.status === 'off_duty' || driver.status === 'unavailable'
+          }
+        })
+        setDrivers(formattedDrivers)
+      }
+    } catch (error) {
+      console.error('Error fetching drivers:', error)
+      setDrivers([])
+    } finally {
+      setDriversLoading(false)
     }
-  ];
+  }
+
+  // Fetch available loads for assignment
+  const fetchAvailableLoads = async () => {
+    if (!currentUser) return;
+
+    setLoadsLoading(true);
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(`${API_URL}/loads?exclude_drafts=true`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Filter loads assigned to this carrier with COVERED status (these are the "tendered" loads from My Loads)
+        // Show all covered loads assigned to the carrier so they can be assigned to drivers
+        // Include loads that:
+        // 1. Are assigned to this carrier (check both assigned_carrier and assigned_carrier_id fields)
+        // 2. Have status "covered" (these are the loads visible in the Tendered section of My Loads)
+        // 3. Are either not assigned to a driver yet, or assigned but pending driver acceptance
+        const carrierLoads = (data.loads || []).filter(load => {
+          // Check if load is assigned to this carrier (handle both field names)
+          const isAssignedToCarrier = 
+            (load.assigned_carrier_id === currentUser.uid) || 
+            (load.assigned_carrier === currentUser.uid)
+          
+          // Only show loads with "covered" status (tendered loads)
+          const isCovered = load.status === "covered"
+          
+          // Include loads that don't have a driver assigned yet, or have a driver but status is pending
+          const hasNoDriver = !load.assigned_driver_id && !load.assigned_driver
+          const driverPendingAcceptance = (load.assigned_driver_id || load.assigned_driver) && 
+                                         (load.driver_assignment_status === "pending" || !load.driver_assignment_status)
+          
+          return isAssignedToCarrier && isCovered && (hasNoDriver || driverPendingAcceptance)
+        });
+        setAvailableLoads(carrierLoads);
+      }
+    } catch (error) {
+      console.error('Error fetching loads:', error)
+      setAvailableLoads([])
+    } finally {
+      setLoadsLoading(false)
+    }
+  }
+
+  // Assign load to driver
+  const handleAssignLoad = async (driverId, loadId) => {
+    if (!currentUser) return;
+
+    setAssigningLoad(`${driverId}-${loadId}`)
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(`${API_URL}/loads/${loadId}/assign-driver`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ driver_id: driverId })
+      });
+
+      if (response.ok) {
+        alert('Load assigned successfully!')
+        // Refresh drivers and loads
+        fetchMyDrivers()
+        fetchAvailableLoads()
+      } else {
+        const error = await response.json()
+        alert(`Failed to assign load: ${error.detail || 'Unknown error'}`)
+      }
+    } catch (error) {
+      console.error('Error assigning load:', error)
+      alert('Failed to assign load. Please try again.')
+    } finally {
+      setAssigningLoad(null)
+    }
+  }
+
+  useEffect(() => {
+    fetchMyDrivers()
+    if (activeTab === 'dispatch') {
+      fetchAvailableLoads()
+    }
+  }, [currentUser, activeTab])
 
   const filteredDrivers = drivers.filter(driver => {
     const matchesSearch = driver.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -179,6 +271,17 @@ const DriversAndDispatches = () => {
           </div>
 
           {/* Driver Cards Grid */}
+          {driversLoading ? (
+            <div style={{ padding: '40px', textAlign: 'center' }}>
+              <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '24px', marginRight: '10px' }}></i>
+              Loading drivers...
+            </div>
+          ) : filteredDrivers.length === 0 ? (
+            <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
+              <i className="fa-solid fa-users" style={{ fontSize: '48px', marginBottom: '20px', opacity: 0.5 }}></i>
+              <p>No drivers found. Hire drivers from the Marketplace to get started.</p>
+            </div>
+          ) : (
           <div className="drivers-grid">
             {filteredDrivers.map(driver => (
               <div key={driver.id} className="driver-card">
@@ -219,7 +322,15 @@ const DriversAndDispatches = () => {
                 <div className="driver-actions">
                   <div className="icon-row">
                     {driver.assignLoad && (
-                    <button className="btn small-cd" style={{width: "100%"}}>
+                    <button 
+                      className="btn small-cd" 
+                      style={{width: "100%"}}
+                      onClick={() => {
+                        // Navigate to dispatch tab to assign load
+                        setActiveTab('dispatch')
+                        // Could also open a modal here
+                      }}
+                    >
                       Assign Load
                     </button>
                   )}
@@ -244,6 +355,7 @@ const DriversAndDispatches = () => {
               </div>
             ))}
           </div>
+          )}
         </>
       )}
 
@@ -255,89 +367,50 @@ const DriversAndDispatches = () => {
             <div className="active-drivers">
               <div className="active-drivers-header">
                 <h3>Active Drivers</h3>
-                <span className="driver-count">24 drivers</span>
+                <span className="driver-count">{drivers.length} driver{drivers.length !== 1 ? 's' : ''}</span>
               </div>
               <div className="driver-status-filters">
-                <span className="status-chip available">Available (8)</span>
-                <span className="status-chip assigned">Assigned (12)</span>
-                <span className="status-chip in-transit">In Transit (3)</span>
-                <span className="status-chip rest">Rest (1)</span>
+                <span className="status-chip available">Available ({drivers.filter(d => d.status === 'Available').length})</span>
+                <span className="status-chip assigned">Assigned ({drivers.filter(d => d.status === 'Assigned').length})</span>
+                <span className="status-chip in-transit">In Transit ({drivers.filter(d => d.status === 'On Route').length})</span>
+                <span className="status-chip rest">Rest ({drivers.filter(d => d.status === 'Off Duty').length})</span>
               </div>
+              {driversLoading ? (
+                <div style={{ padding: '40px', textAlign: 'center' }}>
+                  <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '24px', marginRight: '10px' }}></i>
+                  Loading drivers...
+                </div>
+              ) : drivers.length === 0 ? (
+                <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
+                  <i className="fa-solid fa-users" style={{ fontSize: '48px', marginBottom: '20px', opacity: 0.5 }}></i>
+                  <p>No drivers found. Hire drivers from the Marketplace.</p>
+                </div>
+              ) : (
               <div className="drivers-list">
-                {/* Example driver card, repeat for each driver */}
-                <div className="driver-item">
+                {drivers.map(driver => (
+                <div key={driver.id} className="driver-item">
                   <div className="driver-header-row" style={{display: 'flex', alignItems: 'center', marginBottom: '2px', width: '100%'}}>
                     <div className="driver-header-left">
-                      <img className="driver-avatar" src="https://randomuser.me/api/portraits/men/32.jpg" alt="Mike Rodriguez" />
+                      <div className="driver-avatar" style={{width: '40px', height: '40px', borderRadius: '50%', background: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 'bold'}}>
+                        {driver.avatar}
+                      </div>
                       <div className="driver-header-info">
-                        <div className="driver-name">Mike Rodriguez</div>
-                        <div className="driver-label">CDL-A, HazMat</div>
+                        <div className="driver-name">{driver.name}</div>
+                        <div className="driver-label">CDL-{driver.cdlClass}{driver.endorsements !== 'None' ? `, ${driver.endorsements.split(',')[0]}` : ''}</div>
                       </div>
                     </div>
                     <div className="driver-header-dot">
-                      <span className="driver-status-dot available"></span>
+                      <span className={`driver-status-dot ${driver.status.toLowerCase().replace(' ', '-')}`}></span>
                     </div>
                   </div>
-                  <div className="driver-row"><span className="driver-label">Status:</span><span className="driver-status available">Available</span></div>
-                  <div className="driver-row"><span className="driver-label">Location:</span><span className="driver-value">Dallas, TX</span></div>
-                  <div className="driver-row"><span className="driver-label">HOS Left:</span><span className="driver-value">8h 45m</span></div>
-                  <div className="driver-row"><span className="driver-label">Truck:</span><span className="driver-value">TX-2847</span></div>
-                </div>
-                <div className="driver-item">
-                  <div className="driver-header-row" style={{display: 'flex', alignItems: 'center', marginBottom: '2px', width: '100%'}}>
-                    <div className="driver-header-left">
-                      <img className="driver-avatar" src="https://randomuser.me/api/portraits/men/45.jpg" alt="James Wilson" />
-                      <div className="driver-header-info">
-                        <div className="driver-name">James Wilson</div>
-                        <div className="driver-label">CDL-A</div>
-                      </div>
-                    </div>
-                    <div className="driver-header-dot">
-                      <span className="driver-status-dot assigned"></span>
-                    </div>
-                  </div>
-                  <div className="driver-row"><span className="driver-label">Status:</span><span className="driver-status assigned">Assigned</span></div>
-                  <div className="driver-row"><span className="driver-label">Location:</span><span className="driver-value">Phoenix, AZ</span></div>
-                  <div className="driver-row"><span className="driver-label">HOS Left:</span><span className="driver-value">6h 20m</span></div>
-                  <div className="driver-row"><span className="driver-label">Load:</span><span className="driver-link">#LD-4892</span></div>
-                </div>
-                <div className="driver-item">
-                  <div className="driver-header-row" style={{display: 'flex', alignItems: 'center', marginBottom: '2px', width: '100%'}}>
-                    <div className="driver-header-left">
-                      <img className="driver-avatar" src="https://randomuser.me/api/portraits/women/68.jpg" alt="Sarah Chen" />
-                      <div className="driver-header-info">
-                        <div className="driver-name">Sarah Chen</div>
-                        <div className="driver-label">CDL-A, Doubles</div>
-                      </div>
-                    </div>
-                    <div className="driver-header-dot">
-                      <span className="driver-status-dot available"></span>
-                    </div>
-                  </div>
-                  <div className="driver-row"><span className="driver-label">Status:</span><span className="driver-status available">Available</span></div>
-                  <div className="driver-row"><span className="driver-label">Location:</span><span className="driver-value">Denver, CO</span></div>
-                  <div className="driver-row"><span className="driver-label">HOS Left:</span><span className="driver-value">10h 15m</span></div>
-                  <div className="driver-row"><span className="driver-label">Truck:</span><span className="driver-value">CO-1923</span></div>
-                </div>
-                <div className="driver-item">
-                  <div className="driver-header-row" style={{display: 'flex', alignItems: 'center', marginBottom: '2px', width: '100%'}}>
-                    <div className="driver-header-left">
-                      <img className="driver-avatar" src="https://randomuser.me/api/portraits/men/12.jpg" alt="Robert Johnson" />
-                      <div className="driver-header-info">
-                        <div className="driver-name">Robert Johnson</div>
-                        <div className="driver-label">CDL-A, HazMat</div>
-                      </div>
-                    </div>
-                    <div className="driver-header-dot">
-                      <span className="driver-status-dot in-transit"></span>
-                    </div>
-                  </div>
-                  <div className="driver-row"><span className="driver-label">Status:</span><span className="driver-status in-transit">In Transit</span></div>
-                  <div className="driver-row"><span className="driver-label">Location:</span><span className="driver-value">-</span></div>
+                  <div className="driver-row"><span className="driver-label">Status:</span><span className={`driver-status ${driver.status.toLowerCase().replace(' ', '-')}`}>{driver.status}</span></div>
+                  <div className="driver-row"><span className="driver-label">Location:</span><span className="driver-value">{driver.location}</span></div>
                   <div className="driver-row"><span className="driver-label">HOS Left:</span><span className="driver-value">-</span></div>
-                  <div className="driver-row"><span className="driver-label">Truck:</span><span className="driver-value">-</span></div>
+                  <div className="driver-row"><span className="driver-label">Truck:</span><span className="driver-value">{driver.equipment}</span></div>
                 </div>
+                ))}
               </div>
+              )}
             </div>
             {/* Live Tracking Map Section */}
             <div className="live-tracking-map">
@@ -375,34 +448,73 @@ const DriversAndDispatches = () => {
                 <div className="load-assignment-content">
                   <div className="available-loads-col">
                     <div className="available-loads-title">Available Loads</div>
-                    <div className="available-load-card">
-                      <div className="available-load-card-main-grid">
-                        <div className="available-load-id">#LD-7834</div>
-                        <div className="available-load-price">$2,850</div>
-                        <div className="available-load-label">Pickup:</div>
-                        <div className="available-load-value">Chicago, IL</div>
-                        <div className="available-load-label">Delivery:</div>
-                        <div className="available-load-value">Atlanta, GA</div>
-                        <div className="available-load-label">Due:</div>
-                        <div className="available-load-due">Tomorrow 8:00 AM</div>
-                        <div className="available-load-label">Weight:</div>
-                        <div className="available-load-value">42,000 lbs</div>
+                    {loadsLoading ? (
+                      <div style={{ padding: '20px', textAlign: 'center' }}>
+                        <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '20px', marginRight: '10px' }}></i>
+                        Loading loads...
                       </div>
-                    </div>
-                    <div className="available-load-card">
-                      <div className="available-load-card-main-grid">
-                        <div className="available-load-id">#LD-7835</div>
-                        <div className="available-load-price">$3,200</div>
-                        <div className="available-load-label">Pickup:</div>
-                        <div className="available-load-value">Los Angeles, CA</div>
-                        <div className="available-load-label">Delivery:</div>
-                        <div className="available-load-value">Phoenix, AZ</div>
-                        <div className="available-load-label">Due:</div>
-                        <div className="available-load-due gray">Tomorrow 8:00 AM</div>
-                        <div className="available-load-label">Weight:</div>
-                        <div className="available-load-value">38,000 lbs</div>
+                    ) : availableLoads.length === 0 ? (
+                      <div style={{ padding: '20px', textAlign: 'center', color: '#666' }}>
+                        <p>No available loads. Loads assigned to your carrier will appear here.</p>
                       </div>
-                    </div>
+                    ) : (
+                      availableLoads.map(load => {
+                        // Format price - check total_rate first (as used in MyLoads), then agreed_rate, then rate
+                        const loadPrice = load.total_rate || load.agreed_rate || load.rate;
+                        const formattedPrice = loadPrice ? (typeof loadPrice === 'number' ? `$${loadPrice.toLocaleString()}` : `$${loadPrice}`) : 'N/A';
+                        
+                        // Format load type: map backend values to display format
+                        let loadTypeDisplay = 'N/A';
+                        if (load.load_type) {
+                          if (load.load_type === 'Full Truckload') {
+                            loadTypeDisplay = 'FTL';
+                          } else if (load.load_type === 'LTL') {
+                            loadTypeDisplay = 'LTL';
+                          } else if (load.load_type === 'Multi-Stop') {
+                            loadTypeDisplay = 'Multi';
+                          } else {
+                            loadTypeDisplay = load.load_type;
+                          }
+                        }
+                        
+                        // Format distance
+                        const distance = load.estimated_distance || load.distance;
+                        const formattedDistance = distance ? (typeof distance === 'number' ? `${distance.toLocaleString()} mi` : `${distance} mi`) : 'N/A';
+                        
+                        return (
+                        <div key={load.load_id} className="available-load-card">
+                          <div className="available-load-card-main-grid">
+                            <div className="available-load-id">#{load.load_id?.substring(0, 8) || 'N/A'}</div>
+                            <div className="available-load-price">{formattedPrice}</div>
+                            <div className="available-load-label">Pickup:</div>
+                            <div className="available-load-value">{load.origin || 'N/A'}</div>
+                            <div className="available-load-label">Delivery:</div>
+                            <div className="available-load-value">{load.destination || 'N/A'}</div>
+                            <div className="available-load-label">Due:</div>
+                            <div className="available-load-due">{load.pickup_date || 'TBD'}</div>
+                            <div className="available-load-label">Type:</div>
+                            <div className="available-load-value">{loadTypeDisplay}</div>
+                            <div className="available-load-label">Distance:</div>
+                            <div className="available-load-value">{formattedDistance}</div>
+                            <div className="available-load-label">Weight:</div>
+                            <div className="available-load-value">{load.weight || 'N/A'} lbs</div>
+                          </div>
+                          <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            {drivers.filter(d => d.assignLoad).map(driver => (
+                              <button
+                                key={driver.id}
+                                className="btn small-cd"
+                                onClick={() => handleAssignLoad(driver.id, load.load_id)}
+                                disabled={assigningLoad === `${driver.id}-${load.load_id}`}
+                              >
+                                {assigningLoad === `${driver.id}-${load.load_id}` ? 'Assigning...' : `Assign to ${driver.name.split(' ')[0]}`}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        );
+                      })
+                    )}
                   </div>
                   <div className="exception-handling-col">
                     <div className="exception-handling-title">Exception Handling</div>

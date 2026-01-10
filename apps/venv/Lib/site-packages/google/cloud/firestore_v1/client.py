@@ -39,6 +39,7 @@ from google.cloud.firestore_v1.base_client import (
 
 # Types needed only for Type Hints
 from google.cloud.firestore_v1.base_document import DocumentSnapshot
+from google.cloud.firestore_v1.base_transaction import MAX_ATTEMPTS
 from google.cloud.firestore_v1.batch import WriteBatch
 from google.cloud.firestore_v1.collection import CollectionReference
 from google.cloud.firestore_v1.document import DocumentReference
@@ -50,8 +51,9 @@ from google.cloud.firestore_v1.services.firestore.transports import (
 )
 from google.cloud.firestore_v1.transaction import Transaction
 
-if TYPE_CHECKING:
-    from google.cloud.firestore_v1.bulk_writer import BulkWriter  # pragma: NO COVER
+if TYPE_CHECKING:  # pragma: NO COVER
+    from google.cloud.firestore_v1.bulk_writer import BulkWriter
+    import datetime
 
 
 class Client(BaseClient):
@@ -205,6 +207,8 @@ class Client(BaseClient):
         transaction: Transaction | None = None,
         retry: retries.Retry | object | None = gapic_v1.method.DEFAULT,
         timeout: float | None = None,
+        *,
+        read_time: datetime.datetime | None = None,
     ) -> Generator[DocumentSnapshot, Any, None]:
         """Retrieve a batch of documents.
 
@@ -239,13 +243,17 @@ class Client(BaseClient):
                 should be retried.  Defaults to a system-specified policy.
             timeout (float): The timeout for this request.  Defaults to a
                 system-specified value.
+            read_time (Optional[datetime.datetime]): If set, reads documents as they were at the given
+                time. This must be a timestamp within the past one hour, or if Point-in-Time Recovery
+                is enabled, can additionally be a whole minute timestamp within the past 7 days. If no
+                timezone is specified in the :class:`datetime.datetime` object, it is assumed to be UTC.
 
         Yields:
             .DocumentSnapshot: The next document snapshot that fulfills the
             query, or :data:`None` if the document does not exist.
         """
         request, reference_map, kwargs = self._prep_get_all(
-            references, field_paths, transaction, retry, timeout
+            references, field_paths, transaction, retry, timeout, read_time
         )
 
         response_iterator = self._firestore_api.batch_get_documents(
@@ -261,6 +269,8 @@ class Client(BaseClient):
         self,
         retry: retries.Retry | object | None = gapic_v1.method.DEFAULT,
         timeout: float | None = None,
+        *,
+        read_time: datetime.datetime | None = None,
     ) -> Generator[Any, Any, None]:
         """List top-level collections of the client's database.
 
@@ -269,12 +279,16 @@ class Client(BaseClient):
                 should be retried.  Defaults to a system-specified policy.
             timeout (float): The timeout for this request.  Defaults to a
                 system-specified value.
+            read_time (Optional[datetime.datetime]): If set, reads documents as they were at the given
+                time. This must be a timestamp within the past one hour, or if Point-in-Time Recovery
+                is enabled, can additionally be a whole minute timestamp within the past 7 days. If no
+                timezone is specified in the :class:`datetime.datetime` object, it is assumed to be UTC.
 
         Returns:
             Sequence[:class:`~google.cloud.firestore_v1.collection.CollectionReference`]:
                 iterator of subcollections of the current document.
         """
-        request, kwargs = self._prep_collections(retry, timeout)
+        request, kwargs = self._prep_collections(retry, timeout, read_time)
 
         iterator = self._firestore_api.list_collection_ids(
             request=request,
@@ -378,7 +392,9 @@ class Client(BaseClient):
         """
         return WriteBatch(self)
 
-    def transaction(self, **kwargs) -> Transaction:
+    def transaction(
+        self, max_attempts: int = MAX_ATTEMPTS, read_only: bool = False
+    ) -> Transaction:
         """Get a transaction that uses this client.
 
         See :class:`~google.cloud.firestore_v1.transaction.Transaction` for
@@ -394,4 +410,4 @@ class Client(BaseClient):
             :class:`~google.cloud.firestore_v1.transaction.Transaction`:
             A transaction attached to this client.
         """
-        return Transaction(self, **kwargs)
+        return Transaction(self, max_attempts=max_attempts, read_only=read_only)

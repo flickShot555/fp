@@ -41,3 +41,35 @@ def to_isoformat(dt: Optional[datetime]) -> Optional[str]:
 
 def utcnow() -> datetime:
     return datetime.utcnow()
+
+
+def generate_load_id(region: str = "ATL", user_code: str = None) -> str:
+    """
+    Generate Load ID in format: FP-YYREG-UCODE-SNNNNN
+    
+    Example: FP-25ATL-AB123-S000001
+    
+    Args:
+        region: 3-letter region code (default: "ATL")
+        user_code: Optional user/company code (default: generates from timestamp)
+    
+    Returns:
+        Generated load ID string
+    """
+    import random
+    
+    # Get current year (last 2 digits)
+    year = datetime.now().strftime("%y")
+    
+    # Generate user code if not provided (5 alphanumeric chars)
+    if not user_code:
+        user_code = f"{''.join([chr(random.randint(65, 90)) for _ in range(2)])}{random.randint(100, 999)}"
+    
+    # Get sequence number (we'll implement proper sequencing in storage layer)
+    # For now, use timestamp-based unique number
+    sequence = int(datetime.now().timestamp() * 1000) % 1000000
+    
+    # Format: FP-YYREG-UCODE-SNNNNN
+    load_id = f"FP-{year}{region.upper()[:3]}-{user_code[:5]}-S{sequence:06d}"
+    
+    return load_id

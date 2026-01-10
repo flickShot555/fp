@@ -60,7 +60,10 @@ export default function DocumentVault() {
       });
       if (response.ok) {
         const data = await response.json();
+        console.log('📊 Compliance Score Data (Shipper):', data);
         setComplianceScore(data);
+      } else {
+        console.error('Failed to fetch compliance score:', response.status);
       }
     } catch (error) {
       console.error('Error fetching compliance:', error);
@@ -109,7 +112,7 @@ export default function DocumentVault() {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('document_type', selectedDocType);
-      const response = await fetch(`${API_URL}/documents/upload`, {
+      const response = await fetch(`${API_URL}/documents`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData

@@ -166,7 +166,7 @@ export default function CarrierOnboarding(){
       const headers = {}
       if (token) headers['Authorization'] = `Bearer ${token}`
 
-      const response = await fetch(`${API_URL}/documents/upload`, {
+      const response = await fetch(`${API_URL}/documents`, {
         method: 'POST',
         headers,
         body: formDataUpload

@@ -1,9 +1,47 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import '../../styles/driver/MyCarrier.css';
+import { useAuth } from '../../contexts/AuthContext';
+import { API_URL } from '../../config';
 
 export default function MyCarrier() {
+  const { currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState('Active');
   const [isDarkMode, setIsDarkMode] = useState(false); // Local dark mode state, like Marketplace
+  const [carrier, setCarrier] = useState(null);
+  const [carrierLoading, setCarrierLoading] = useState(true);
+
+  // Fetch carrier information
+  useEffect(() => {
+    const fetchCarrier = async () => {
+      if (!currentUser) {
+        setCarrierLoading(false);
+        return;
+      }
+
+      setCarrierLoading(true);
+      try {
+        const token = await currentUser.getIdToken();
+        const response = await fetch(`${API_URL}/drivers/my-carrier`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setCarrier(data.carrier);
+        }
+      } catch (error) {
+        console.error('Error fetching carrier:', error);
+        setCarrier(null);
+      } finally {
+        setCarrierLoading(false);
+      }
+    };
+
+    fetchCarrier();
+  }, [currentUser]);
 
   return (
     <>
@@ -11,32 +49,73 @@ export default function MyCarrier() {
       {/* <button onClick={() => setIsDarkMode(d => !d)}>Toggle Dark Mode</button> */}
       <section className={`dd-grid${isDarkMode ? ' dark' : ''}`}>
           {/* Carrier Info Card */}
+          {carrierLoading ? (
+            <div className="card mc-carrier-card">
+              <div style={{ padding: '40px', textAlign: 'center' }}>
+                <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '24px', marginRight: '10px' }}></i>
+                Loading carrier information...
+              </div>
+            </div>
+          ) : !carrier ? (
+            <div className="card mc-carrier-card">
+              <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
+                <i className="fa-solid fa-building" style={{ fontSize: '48px', marginBottom: '20px', opacity: 0.5 }}></i>
+                <h3 style={{ marginBottom: '12px' }}>No Carrier Assigned</h3>
+                <p>You are not currently hired by any carrier. Once a carrier hires you from the marketplace, their information will appear here.</p>
+              </div>
+            </div>
+          ) : (
           <div className="card mc-carrier-card">
             <div className="mc-carrier-header">
-              <div className="mc-carrier-logo">TL</div>
+              <div className="mc-carrier-logo">
+                {(() => {
+                  const name = carrier.name || carrier.company_name || '';
+                  if (name) {
+                    const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+                    return initials || 'CA';
+                  }
+                  return 'CA';
+                })()}
+              </div>
               <div className="mc-carrier-info">
                 <div className="mc-carrier-name">
-                  <h3>TransLogistics Inc.</h3>
+                  <h3>{carrier.name || carrier.company_name || 'Unknown Carrier'}</h3>
                   <span className="int-status-badge active">
-                    Verified Carrier
+                    {carrier.status === 'active' ? 'Active Carrier' : 'Verified Carrier'}
                   </span>
                 </div>
                 <div className="mc-carrier-details">
-                  <span className="mc-detail">DOT: 2847563</span>
-                  <span className="mc-detail">MC: 928374</span>
-                  <span className="mc-detail">Atlanta, GA</span>
-                  <span className="mc-detail">15 Years in Operation</span>
+                  {carrier.dot_number && (
+                    <span className="mc-detail">DOT: {carrier.dot_number}</span>
+                  )}
+                  {carrier.mc_number && (
+                    <span className="mc-detail">MC: {carrier.mc_number}</span>
+                  )}
+                  {carrier.service_areas && carrier.service_areas.length > 0 && (
+                    <span className="mc-detail">{carrier.service_areas[0]}</span>
+                  )}
+                  {carrier.email && (
+                    <span className="mc-detail">{carrier.email}</span>
+                  )}
                 </div>
               </div>
               <div className="mc-carrier-status">
-                <span className="int-status-badge active">Active</span>
-                <div className="mc-rating">
-                  <i className="fa-solid fa-star"></i>
-                  <span>98.5% On-Time</span>
-                </div>
+                <span className="int-status-badge active">{carrier.status === 'active' ? 'Active' : 'Active'}</span>
+                {carrier.rating && (
+                  <div className="mc-rating">
+                    <i className="fa-solid fa-star"></i>
+                    <span>{carrier.rating} Rating</span>
+                  </div>
+                )}
+                {carrier.total_loads && (
+                  <div className="mc-rating" style={{ marginTop: '8px' }}>
+                    <span>{carrier.total_loads} Loads</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
+          )}
 
             {/* AI Assistant Alert */}
           <div className="mc-ai-alert-card" style={{marginTop: '10px', marginBottom: '10px'}}>

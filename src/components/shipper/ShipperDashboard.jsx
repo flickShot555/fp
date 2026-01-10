@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 import { API_URL } from '../../config';
 import TrackingVisibility from './TrackingVisibility';
 import DocumentVault from './DocumentVault';
@@ -12,12 +13,19 @@ import ComplianceOverview from './ComplianceOverview';
 import AiHub from './AiHub';
 import ShipperAnalytics from './Analytics';
 import Settings from './Settings';
+import AddLoads from '../carrier/AddLoads';
+import DraftLoadsModal from './DraftLoadsModal';
+import InviteCarrierModal from './InviteCarrierModal';
+import CarrierBids from './CarrierBids';
+import ShipperMyLoads from './MyLoads';
+import '../../styles/shipper/InviteCarrierModal.css';
 // OnboardingCoach removed - compliance data now shown in Compliance & Safety page
 import logo from '/src/assets/logo.png';
 import resp_logo from '/src/assets/logo_1.png';
 
 export default function ShipperDashboard() {
-  const { currentUser } = useAuth();
+  const { currentUser, logout } = useAuth();
+  const navigate = useNavigate();
   const [activeNav, setActiveNav] = useState('home');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarDark, setIsSidebarDark] = useState(false);
@@ -26,6 +34,110 @@ export default function ShipperDashboard() {
   // Onboarding data state
   const [shipperProfile, setShipperProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(true);
+
+  // Dashboard stats state
+  const [dashboardStats, setDashboardStats] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+
+  // AddLoads modal state
+  const [showAddLoads, setShowAddLoads] = useState(false);
+  const [editingDraftLoad, setEditingDraftLoad] = useState(null);
+
+  // Draft loads modal state
+  const [showDraftLoadsModal, setShowDraftLoadsModal] = useState(false);
+
+  // Invite Carrier modal state
+  const [isInviteCarrierOpen, setIsInviteCarrierOpen] = useState(false);
+
+  // File upload ref
+  const fileInputRef = React.useRef(null);
+
+  // Handle file upload
+  const handleFileUpload = async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setStatsLoading(true);
+    
+    try {
+      const token = await currentUser.getIdToken();
+      
+      for (const file of files) {
+        // Create FormData for file upload
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        console.log(`Uploading: ${file.name}...`);
+        
+        const response = await fetch(`${API_URL}/documents`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          },
+          body: formData
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('✅ Upload successful:', data);
+          alert(`Document "${file.name}" uploaded successfully!\nType: ${data.doc_type}\nValidation: ${data.validation.status}`);
+        } else {
+          const error = await response.json();
+          console.error('Upload failed:', error);
+          alert(`Failed to upload "${file.name}": ${error.detail || 'Unknown error'}`);
+        }
+      }
+      
+      // Refresh dashboard stats after all uploads
+      await fetchStats();
+      
+    } catch (err) {
+      console.error('Error uploading documents:', err);
+      alert('Error uploading documents. Please try again.');
+    } finally {
+      setStatsLoading(false);
+      // Clear the file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Fetch dashboard stats
+  const fetchStats = async () => {
+    if (!currentUser) {
+      setStatsLoading(false);
+      return;
+    }
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(`${API_URL}/dashboard/stats`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setDashboardStats(data);
+      }
+    } catch (error) {
+      console.error('Error fetching dashboard stats:', error);
+    } finally {
+      setStatsLoading(false);
+    }
+  };
+
+  // Handle editing draft loads
+  const handleEditDraft = (draftLoad) => {
+    setEditingDraftLoad(draftLoad);
+    setShowAddLoads(true);
+  };
+
+  // Fetch dashboard stats
+  useEffect(() => {
+    fetchStats();
+  }, [currentUser]);
 
   // Fetch onboarding data on mount
   useEffect(() => {
@@ -60,8 +172,10 @@ export default function ShipperDashboard() {
       title: 'OPERATE',
       items: [
         { key: 'home', label: 'Dashboard', icon: 'fa-solid fa-house' },
+        { key: 'my-loads', label: 'My Loads', icon: 'fa-solid fa-truck' },
         { key: 'my-carriers', label: 'My Carriers', icon: 'fa-solid fa-people-group' },
         { key: 'marketplace', label: 'Marketplace', icon: 'fa-solid fa-store' },
+        { key: 'carrier-bids', label: 'Carrier Bids', icon: 'fa-solid fa-hand-holding-dollar' },
         { key: 'tracking', label: 'Tracking & Visibility', icon: 'fa-solid fa-location-crosshairs' },
         { key: 'doc-vault', label: 'Document Vault', icon: 'fa-solid fa-folder' },
       ]
@@ -77,11 +191,33 @@ export default function ShipperDashboard() {
     {
       title: 'SYSTEM',
       items: [
+        { key: 'profile', label: 'Profile', icon: 'fa-solid fa-user' },
         { key: 'settings', label: 'Settings', icon: 'fa-solid fa-gear' },
-        { key: 'help', label: 'AI Hub', icon: 'fa-regular fa-circle-question' }
+        { key: 'help', label: 'AI Hub', icon: 'fa-regular fa-circle-question' },
+        { key: 'logout', label: 'Logout', icon: 'fa-solid fa-right-from-bracket' }
       ]
     }
   ];
+
+  // Handle logout
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate('/login');
+    } catch (error) {
+      console.error('Error logging out:', error);
+    }
+  };
+
+  // Handle navigation click
+  const handleNavClick = (key) => {
+    if (key === 'logout') {
+      handleLogout();
+    } else {
+      setActiveNav(key);
+      if (isSidebarOpen) setIsSidebarOpen(false);
+    }
+  };
 
   // --- FILTER DROPDOWNS STATE ---
   const [openDropdown, setOpenDropdown] = useState(null);
@@ -107,9 +243,17 @@ export default function ShipperDashboard() {
       <>
         <header className="fp-header">
           <div className="fp-header-controls">
-            <button className="btn small-cd">+ Create Load</button>
-            <button className="btn small ghost-cd">Invite Carrier</button>
-            <button className="btn small ghost-cd">Upload Document</button>
+            <button className="btn small-cd" onClick={() => setShowAddLoads(true)}>+ Create Load</button>
+            <button className="btn small ghost-cd" onClick={() => setIsInviteCarrierOpen(true)}>Invite Carrier</button>
+            <button className="btn small ghost-cd" onClick={() => fileInputRef.current?.click()}>Upload Document</button>
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              style={{ display: 'none' }} 
+              multiple 
+              onChange={handleFileUpload}
+              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+            />
             <button className="btn small ghost-cd">Track Shipments</button>
           </div>
         </header>
@@ -144,7 +288,7 @@ export default function ShipperDashboard() {
               {!shipperProfile.onboarding_completed && (
                 <div style={{ marginTop: '16px', padding: '12px', background: '#fef3c7', borderRadius: '8px', color: '#92400e' }}>
                   <i className="fa-solid fa-exclamation-triangle" style={{ marginRight: '8px' }}></i>
-                  Onboarding not complete. <a href="/shipper-onboarding" style={{ color: '#1d4ed8', textDecoration: 'underline' }}>Complete now</a>
+                  Onboarding not complete. <button onClick={() => setActiveNav('profile')} style={{ background: 'none', border: 'none', color: '#1d4ed8', textDecoration: 'underline', cursor: 'pointer', padding: 0 }}>Complete your profile</button>
                 </div>
               )}
             </div>
@@ -159,24 +303,24 @@ export default function ShipperDashboard() {
               <h4>Active Loads</h4>
               <i className="fa-solid fa-truck" aria-hidden="true" />
             </div>
-            <div className="big">24</div>
-            <div className="small-sub-active">+3 today</div>
+            <div className="big">{statsLoading ? '...' : (dashboardStats?.active_loads || 0)}</div>
+            <div className="small-sub-active">+{dashboardStats?.active_loads_today || 0} today</div>
           </div>
           <div className="card sd-small-card">
             <div className="sd-small-card-row">
               <h4>On-Time %</h4>
               <i className="fa-solid fa-clock" aria-hidden="true" />
             </div>
-            <div className="big green">96.2%</div>
-            <div className="small-sub-time">+1.2%</div>
+            <div className="big green">{statsLoading ? '...' : `${dashboardStats?.on_time_percentage || 0}%`}</div>
+            <div className="small-sub-time">{dashboardStats?.on_time_change || '+0%'}</div>
           </div>
           <div className="card sd-small-card">
             <div className="sd-small-card-row">
               <h4>Carrier Rating</h4>
               <i className="fa-solid fa-star" aria-hidden="true" />
             </div>
-            <div className="big">4.8</div>
-            <div className="small-sub-rating">Excellent</div>
+            <div className="big">{statsLoading ? '...' : (dashboardStats?.rating || 0)}</div>
+            <div className="small-sub-rating">{dashboardStats?.rating_label || 'N/A'}</div>
           </div>
 
           <div className="card sd-small-card">
@@ -184,29 +328,29 @@ export default function ShipperDashboard() {
               <h4>Total Revenue</h4>
               <i className="fa-solid fa-dollar-sign" aria-hidden="true" />
             </div>
-            <div className="big">$342K</div>
-            <div className="small-sub-revenue">+12% MTD</div>
+            <div className="big">${statsLoading ? '...' : ((dashboardStats?.total_revenue || 0) / 1000).toFixed(0)}K</div>
+            <div className="small-sub-revenue">{dashboardStats?.revenue_change || '+0%'} MTD</div>
           </div>
           <div className="card sd-small-card">
             <div className="sd-small-card-row">
               <h4>Compliance</h4>
               <i className="fa-solid fa-shield-halved" aria-hidden="true" />
             </div>
-            <div className="big">94%</div>
-            <div className="small-sub-compliance">2 expiring</div>
+            <div className="big">{statsLoading ? '...' : `${dashboardStats?.compliance_score || 0}%`}</div>
+            <div className="small-sub-compliance">{dashboardStats?.compliance_expiring || 0} expiring</div>
           </div>
-          <div className="card sd-small-card">
+          <div className="card sd-small-card" style={{ cursor: 'pointer' }} onClick={() => setShowDraftLoadsModal(true)}>
             <div className="sd-small-card-row">
-              <h4>Pending Tasks</h4>
-              <i className="fa-solid fa-list-check" aria-hidden="true" />
+              <h4>Draft Loads</h4>
+              <i className="fa-solid fa-file-lines" aria-hidden="true" />
             </div>
-            <div className="big">8</div>
-            <div className="small-sub-task">3 urgent</div>
+            <div className="big">{statsLoading ? '...' : (dashboardStats?.draft_loads || 0)}</div>
+            <div className="small-sub-task">Click to manage</div>
           </div>
 
           <div className="card sd-small-card shd-ai-summary">
             <h4>AI Summary</h4>
-            <div className="big">132 loads</div>
+            <div className="big">{statsLoading ? '...' : (dashboardStats?.total_loads || 0)} loads</div>
           </div>
         </section>
 
@@ -334,15 +478,35 @@ export default function ShipperDashboard() {
 
   function ContentView({ activeNav }) {
     if (activeNav === 'home') return <HomeView />;
+    if (activeNav === 'my-loads') return <ShipperMyLoads />;
     if (activeNav === 'my-carriers') return <MyCarriers />;
     if (activeNav === 'marketplace') return <ShipperMarketplace />;
+    if (activeNav === 'carrier-bids') return <CarrierBids />;
     if (activeNav === 'tracking') return <TrackingVisibility />;
     if (activeNav === 'doc-vault') return <DocumentVault />;
     if (activeNav === 'finance') return <Finance />;
     if (activeNav === 'compliance') return <ComplianceOverview />;
     if (activeNav === 'settings') return <Settings />;
-  if (activeNav === 'help') return <AiHub />;
-  if (activeNav === 'analytics') return <ShipperAnalytics />;
+    if (activeNav === 'help') return <AiHub />;
+    if (activeNav === 'analytics') return <ShipperAnalytics />;
+    if (activeNav === 'profile') return (
+      <div>
+        <header className="fp-header">
+          <div className="fp-header-titles">
+            <h2>Profile</h2>
+            <p className="fp-subtitle">Complete your business profile and onboarding information.</p>
+          </div>
+        </header>
+        <section className="fp-grid">
+          <div className="card">
+            <div className="card-header"><h3>Profile Component</h3></div>
+            <div style={{ padding: 20 }}>
+              <p>Profile component will be added here. This is where users can complete their onboarding details.</p>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
     return (
       <div>
         <header className="fp-header">
@@ -425,7 +589,7 @@ export default function ShipperDashboard() {
                     <li
                       className={`nav-item ${activeNav === it.key ? 'active' : ''}`}
                       key={it.key}
-                      onClick={() => { setActiveNav(it.key); if (isSidebarOpen) setIsSidebarOpen(false); }}
+                      onClick={() => handleNavClick(it.key)}
                       role="button"
                       tabIndex={0}
                     >
@@ -461,6 +625,42 @@ export default function ShipperDashboard() {
           <ContentView activeNav={activeNav} />
         </main>
       </div>
+
+      {/* AddLoads Modal */}
+      {showAddLoads && (
+        <AddLoads 
+          onClose={() => {
+            setShowAddLoads(false);
+            setEditingDraftLoad(null);
+          }} 
+          isShipper={true}
+          draftLoad={editingDraftLoad}
+        />
+      )}
+
+      {/* Draft Loads Modal */}
+      {showDraftLoadsModal && (
+        <DraftLoadsModal
+          onClose={() => setShowDraftLoadsModal(false)}
+          onEditDraft={handleEditDraft}
+        />
+      )}
+
+      {/* Invite Carrier Modal */}
+      <InviteCarrierModal 
+        isOpen={isInviteCarrierOpen} 
+        onClose={() => setIsInviteCarrierOpen(false)} 
+      />
+
+      {/* Hidden File Input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+        style={{ display: 'none' }}
+        onChange={handleFileUpload}
+      />
     </div>
   );
 }

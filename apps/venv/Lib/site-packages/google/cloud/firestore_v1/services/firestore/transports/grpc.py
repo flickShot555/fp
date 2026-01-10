@@ -164,9 +164,10 @@ class FirestoreGrpcTransport(FirestoreTransport):
                 are specified, the client will attempt to ascertain the
                 credentials from the environment.
                 This argument is ignored if a ``channel`` instance is provided.
-            credentials_file (Optional[str]): A file with credentials that can
+            credentials_file (Optional[str]): Deprecated. A file with credentials that can
                 be loaded with :func:`google.auth.load_credentials_from_file`.
                 This argument is ignored if a ``channel`` instance is provided.
+                This argument will be removed in the next major version of this library.
             scopes (Optional(Sequence[str])): A list of scopes. This argument is
                 ignored if a ``channel`` instance is provided.
             channel (Optional[Union[grpc.Channel, Callable[..., grpc.Channel]]]):
@@ -299,9 +300,10 @@ class FirestoreGrpcTransport(FirestoreTransport):
                 credentials identify this application to the service. If
                 none are specified, the client will attempt to ascertain
                 the credentials from the environment.
-            credentials_file (Optional[str]): A file with credentials that can
+            credentials_file (Optional[str]): Deprecated. A file with credentials that can
                 be loaded with :func:`google.auth.load_credentials_from_file`.
-                This argument is mutually exclusive with credentials.
+                This argument is mutually exclusive with credentials.  This argument will be
+                removed in the next major version of this library.
             scopes (Optional[Sequence[str]]): A optional list of scopes needed for this
                 service. These are only used when credentials are not specified and
                 are passed to :func:`google.auth.default`.
@@ -570,6 +572,34 @@ class FirestoreGrpcTransport(FirestoreTransport):
                 response_deserializer=firestore.RunQueryResponse.deserialize,
             )
         return self._stubs["run_query"]
+
+    @property
+    def execute_pipeline(
+        self,
+    ) -> Callable[
+        [firestore.ExecutePipelineRequest], firestore.ExecutePipelineResponse
+    ]:
+        r"""Return a callable for the execute pipeline method over gRPC.
+
+        Executes a pipeline query.
+
+        Returns:
+            Callable[[~.ExecutePipelineRequest],
+                    ~.ExecutePipelineResponse]:
+                A function that, when called, will call the underlying RPC
+                on the server.
+        """
+        # Generate a "stub function" on-the-fly which will actually make
+        # the request.
+        # gRPC handles serialization and deserialization, so we just need
+        # to pass in the functions for each.
+        if "execute_pipeline" not in self._stubs:
+            self._stubs["execute_pipeline"] = self._logged_channel.unary_stream(
+                "/google.firestore.v1.Firestore/ExecutePipeline",
+                request_serializer=firestore.ExecutePipelineRequest.serialize,
+                response_deserializer=firestore.ExecutePipelineResponse.deserialize,
+            )
+        return self._stubs["execute_pipeline"]
 
     @property
     def run_aggregation_query(

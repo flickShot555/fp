@@ -37,6 +37,7 @@ if TYPE_CHECKING:  # pragma: NO COVER
     from google.cloud.firestore_v1.base_aggregation import AggregationResult
     from google.cloud.firestore_v1.query_profile import ExplainMetrics, ExplainOptions
     import google.cloud.firestore_v1.types.query_profile as query_profile_pb
+    import datetime
 
 
 class AsyncAggregationQuery(BaseAggregationQuery):
@@ -55,14 +56,14 @@ class AsyncAggregationQuery(BaseAggregationQuery):
         timeout: float | None = None,
         *,
         explain_options: Optional[ExplainOptions] = None,
+        read_time: Optional[datetime.datetime] = None,
     ) -> QueryResultsList[List[AggregationResult]]:
         """Runs the aggregation query.
 
         This sends a ``RunAggregationQuery`` RPC and returns a list of aggregation results in the stream of ``RunAggregationQueryResponse`` messages.
 
         Args:
-            transaction
-                (Optional[:class:`~google.cloud.firestore_v1.transaction.Transaction`]):
+            transaction (Optional[:class:`~google.cloud.firestore_v1.transaction.Transaction`]):
                 An existing transaction that this query will run in.
                 If a ``transaction`` is used and it already has write operations
                 added, this method cannot be used (i.e. read-after-write is not
@@ -71,10 +72,13 @@ class AsyncAggregationQuery(BaseAggregationQuery):
                 should be retried.  Defaults to a system-specified policy.
             timeout (float): The timeout for this request.  Defaults to a
                 system-specified value.
-            explain_options
-                (Optional[:class:`~google.cloud.firestore_v1.query_profile.ExplainOptions`]):
+            explain_options (Optional[:class:`~google.cloud.firestore_v1.query_profile.ExplainOptions`]):
                 Options to enable query profiling for this query. When set,
                 explain_metrics will be available on the returned generator.
+            read_time (Optional[datetime.datetime]): If set, reads documents as they were at the given
+                time. This must be a timestamp within the past one hour, or if Point-in-Time Recovery
+                is enabled, can additionally be a whole minute timestamp within the past 7 days. If no
+                timezone is specified in the :class:`datetime.datetime` object, it is assumed to be UTC.
 
         Returns:
             QueryResultsList[List[AggregationResult]]: The aggregation query results.
@@ -87,6 +91,7 @@ class AsyncAggregationQuery(BaseAggregationQuery):
             retry=retry,
             timeout=timeout,
             explain_options=explain_options,
+            read_time=read_time,
         )
         try:
             result = [aggregation async for aggregation in stream_result]
@@ -106,6 +111,7 @@ class AsyncAggregationQuery(BaseAggregationQuery):
         retry: retries.AsyncRetry | object | None = gapic_v1.method.DEFAULT,
         timeout: Optional[float] = None,
         explain_options: Optional[ExplainOptions] = None,
+        read_time: Optional[datetime.datetime] = None,
     ) -> AsyncGenerator[List[AggregationResult] | query_profile_pb.ExplainMetrics, Any]:
         """Internal method for stream(). Runs the aggregation query.
 
@@ -126,10 +132,13 @@ class AsyncAggregationQuery(BaseAggregationQuery):
                 system-specified policy.
             timeout (Optional[float]): The timeout for this request. Defaults
                 to a system-specified value.
-            explain_options
-                (Optional[:class:`~google.cloud.firestore_v1.query_profile.ExplainOptions`]):
+            explain_options (Optional[:class:`~google.cloud.firestore_v1.query_profile.ExplainOptions`]):
                 Options to enable query profiling for this query. When set,
                 explain_metrics will be available on the returned generator.
+            read_time (Optional[datetime.datetime]): If set, reads documents as they were at the given
+                time. This must be a timestamp within the past one hour, or if Point-in-Time Recovery
+                is enabled, can additionally be a whole minute timestamp within the past 7 days. If no
+                timezone is specified in the :class:`datetime.datetime` object, it is assumed to be UTC.
 
         Yields:
             List[AggregationResult] | query_profile_pb.ExplainMetrics:
@@ -143,6 +152,7 @@ class AsyncAggregationQuery(BaseAggregationQuery):
             retry,
             timeout,
             explain_options,
+            read_time,
         )
 
         response_iterator = await self._client._firestore_api.run_aggregation_query(
@@ -167,6 +177,7 @@ class AsyncAggregationQuery(BaseAggregationQuery):
         timeout: Optional[float] = None,
         *,
         explain_options: Optional[ExplainOptions] = None,
+        read_time: Optional[datetime.datetime] = None,
     ) -> AsyncStreamGenerator[List[AggregationResult]]:
         """Runs the aggregation query.
 
@@ -186,10 +197,13 @@ class AsyncAggregationQuery(BaseAggregationQuery):
                 system-specified policy.
             timeout (Optional[float]): The timeout for this request. Defaults
                 to a system-specified value.
-            explain_options
-                (Optional[:class:`~google.cloud.firestore_v1.query_profile.ExplainOptions`]):
+            explain_options (Optional[:class:`~google.cloud.firestore_v1.query_profile.ExplainOptions`]):
                 Options to enable query profiling for this query. When set,
                 explain_metrics will be available on the returned generator.
+            read_time (Optional[datetime.datetime]): If set, reads documents as they were at the given
+                time. This must be a timestamp within the past one hour, or if Point-in-Time Recovery
+                is enabled, can additionally be a whole minute timestamp within the past 7 days. If no
+                timezone is specified in the :class:`datetime.datetime` object, it is assumed to be UTC.
 
         Returns:
             `AsyncStreamGenerator[List[AggregationResult]]`:
@@ -201,5 +215,6 @@ class AsyncAggregationQuery(BaseAggregationQuery):
             retry=retry,
             timeout=timeout,
             explain_options=explain_options,
+            read_time=read_time,
         )
         return AsyncStreamGenerator(inner_generator, explain_options)

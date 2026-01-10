@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 import { API_URL } from '../../config';
 
 import DocumentVault from './DocumentVault';
@@ -15,7 +16,8 @@ import logo from '/src/assets/logo.png';
 import resp_logo from '/src/assets/logo_1.png';
 
 export default function DriverDashboard() {
-  const { currentUser } = useAuth();
+  const { currentUser, logout } = useAuth();
+  const navigate = useNavigate();
   const [activeNav, setActiveNav] = useState('home');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -25,6 +27,11 @@ export default function DriverDashboard() {
   const [driverProfile, setDriverProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [onboardingScore, setOnboardingScore] = useState(null);
+  const [profileData, setProfileData] = useState({
+    name: '',
+    profilePicture: null,
+    role: 'Pre-Hire Driver'
+  });
 
   // Fetch onboarding data on mount
   useEffect(() => {
@@ -47,6 +54,15 @@ export default function DriverDashboard() {
           if (typeof data.onboarding_score !== 'undefined') {
             setOnboardingScore(data.onboarding_score);
           }
+          
+          // Update profile data for header display
+          if (data.data) {
+            setProfileData({
+              name: data.data.fullName || currentUser.displayName || 'Driver',
+              profilePicture: data.data.profile_picture_url || null,
+              role: isPostHire ? 'Active Driver' : 'Pre-Hire Driver'
+            });
+          }
         }
 
         // Fetch onboarding coach for progress/score if available
@@ -66,7 +82,7 @@ export default function DriverDashboard() {
       }
     };
     fetchProfile();
-  }, [currentUser]);
+  }, [currentUser, isPostHire]);
 
   const navGroups = [
     {
@@ -90,10 +106,31 @@ export default function DriverDashboard() {
       title: 'SUPPORT',
       items: [
         { key: 'settings', label: 'Account & Settings', icon: 'fa-solid fa-gear' },
-        { key: 'help', label: 'AI Hub', icon: 'fa-solid fa-robot' }
+        { key: 'help', label: 'AI Hub', icon: 'fa-solid fa-robot' },
+        { key: 'logout', label: 'Logout', icon: 'fa-solid fa-right-from-bracket' }
       ]
     }
   ];
+
+  // Handle logout
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate('/login');
+    } catch (error) {
+      console.error('Error logging out:', error);
+    }
+  };
+
+  // Handle navigation click
+  const handleNavClick = (key) => {
+    if (key === 'logout') {
+      handleLogout();
+    } else {
+      setActiveNav(key);
+      if (isSidebarOpen) setIsSidebarOpen(false);
+    }
+  };
 
   function HomeView() {
     return (
@@ -102,7 +139,7 @@ export default function DriverDashboard() {
           <div className="fp-header-titles">
             <h2>
               <span role="img" aria-label="wave">👋</span>
-              Welcome to FreightPower, Marcus!
+              Welcome to FreightPower, {profileData.name || 'Driver'}!
             </h2>
             <p className="fp-subtitle">Complete your onboarding to start connecting with carriers and finding loads.</p>
             <button onClick={() => setIsPostHire(true)} className="btn small green-btn">Post Hire</button>
@@ -727,7 +764,34 @@ export default function DriverDashboard() {
       case 'esign':
         return <ConsentESignature />;
       case 'settings':
-        return <AccountSettings />;
+        return <AccountSettings onProfileUpdate={() => {
+          // Refresh profile data when settings are updated
+          const fetchProfile = async () => {
+            if (!currentUser) return;
+            try {
+              const token = await currentUser.getIdToken();
+              const response = await fetch(`${API_URL}/onboarding/data`, {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+              if (response.ok) {
+                const data = await response.json();
+                if (data.data) {
+                  setProfileData({
+                    name: data.data.fullName || currentUser.displayName || 'Driver',
+                    profilePicture: data.data.profile_picture_url || null,
+                    role: isPostHire ? 'Active Driver' : 'Pre-Hire Driver'
+                  });
+                }
+              }
+            } catch (error) {
+              console.error('Error refreshing profile:', error);
+            }
+          };
+          fetchProfile();
+        }} />;
       case 'help':
         return <AiHub />;
       default:
@@ -768,10 +832,17 @@ export default function DriverDashboard() {
                                   </div>
                 </div>
                       <div className="user-profile dd-user-profile">
-                        <img src="https://randomuser.me/api/portraits/men/75.jpg" alt="Marcus Johnson" className="avatar-img user-avatar-desktop dd-avatar-img"/>
+                        <img 
+                          src={profileData.profilePicture || "https://randomuser.me/api/portraits/men/75.jpg"} 
+                          alt={profileData.name} 
+                          className="avatar-img user-avatar-desktop dd-avatar-img"
+                          onError={(e) => {
+                            e.target.src = "https://randomuser.me/api/portraits/men/75.jpg";
+                          }}
+                        />
                         <div className="user-info user-info-desktop dd-user-info">
-                          <div className="user-name">Marcus Johnson</div>
-                          <div className="user-role dd-user-role">Pre-Hire Driver</div>
+                          <div className="user-name">{profileData.name || 'Driver'}</div>
+                          <div className="user-role dd-user-role">{profileData.role}</div>
                         </div>
                       </div>
 
@@ -827,8 +898,8 @@ export default function DriverDashboard() {
               <div className="logo"><img src={logo} alt="FreightPower" className="landing-logo-image" /></div>
             </div>
             <div className="ids mobile-ids">
-              <div className="mobile-id-line"><span className="id-pair"><span className="id-label">Marcus Johnson</span></span></div>
-              <div className="mobile-id-line"><span className="id-pair"><span className="id-label">{isPostHire ? 'Active Driver' : 'Pre-Hire Driver'}</span></span></div>
+              <div className="mobile-id-line"><span className="id-pair"><span className="id-label">{profileData.name || 'Driver'}</span></span></div>
+              <div className="mobile-id-line"><span className="id-pair"><span className="id-label">{profileData.role}</span></span></div>
             </div>
             <div className="chips sidebar-chips">
               {isPostHire ? (
@@ -851,7 +922,7 @@ export default function DriverDashboard() {
                     <li
                       className={`nav-item ${activeNav === item.key ? 'active' : ''}`}
                       key={item.key}
-                      onClick={() => { setActiveNav(item.key); if (isSidebarOpen) setIsSidebarOpen(false); }}
+                      onClick={() => handleNavClick(item.key)}
                       role="button"
                       tabIndex={0}
                     >

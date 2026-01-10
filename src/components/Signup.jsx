@@ -70,14 +70,17 @@ export default function Signup(){
       // 1. Create Account in Backend
       await signup(email, password, name, formattedPhone || null, role)
 
-      // 2. Sign In to Firebase (Client Side) to get the User Object
+      // 2. Wait for Firebase Auth to propagate (fix for "Invalid JWT Signature")
+      await new Promise(resolve => setTimeout(resolve, 1000))
+
+      // 3. Sign In to Firebase (Client Side) to get the User Object
       // We need to be signed in to send the verification email
       const userCredential = await login(email, password)
 
-      // 3. Send the Verification Link
+      // 4. Send the Verification Link
       await sendVerificationLink(userCredential.user)
 
-      // 4. Redirect to role-specific onboarding page
+      // 5. Redirect to role-specific onboarding page
       const onboardingRoutes = {
         carrier: '/carrier-onboarding',
         driver: '/driver-onboarding',

@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     DATA_DIR: str = Field(default=os.getenv("DATA_DIR", "./data"))
     APP_HOST: str = Field(default=os.getenv("APP_HOST", "0.0.0.0"))
     APP_PORT: int = Field(default=int(os.getenv("APP_PORT", "8000")))
+    API_BASE_URL: str = Field(default=os.getenv("API_BASE_URL", "http://localhost:8000"))
     FMCSA_BASE_URL: str = Field(default=os.getenv("FMCSA_BASE_URL", "https://mobile.fmcsa.dot.gov/qc/services"))
     FMCSA_API_KEY: str = Field(default=os.getenv("FMCSA_API_KEY", ""))
     FMCSA_WEB_KEY: str = Field(default=os.getenv("FMCSA_WEB_KEY", ""))

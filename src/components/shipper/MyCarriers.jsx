@@ -1,18 +1,64 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import '../../styles/shipper/MyCarriers.css';
-import InviteCarrierModal from './InviteCarrierModal';
-import '../../styles/shipper/InviteCarrierModal.css';
+import { useAuth } from '../../contexts/AuthContext';
+import { API_URL } from '../../config';
 
 export default function MyCarriers() {
-  const tabs = [
-    { id: 'all', label: 'All (1,247)' },
-    { id: 'active', label: 'Active (1,089)' },
-    { id: 'pending', label: 'Pending (43)' },
-    { id: 'compliance', label: 'Compliance (27)' },
-    { id: 'blocked', label: 'Blocked (15)' }
-  ];
+  const { currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState('all');
-  const [isInviteOpen, setIsInviteOpen] = useState(false);
+  const [carriers, setCarriers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch carriers from backend (only show carriers that have accepted invitations)
+  useEffect(() => {
+    const fetchCarriers = async () => {
+      if (!currentUser) return;
+      
+      setLoading(true);
+      try {
+        const token = await currentUser.getIdToken();
+        const response = await fetch(`${API_URL}/carriers/my-carriers`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          // Extract carrier data from relationships
+          const carrierList = (data.carriers || []).map(rel => ({
+            ...rel,
+            id: rel.carrier_id,
+            status: rel.status || 'active'
+          }));
+          setCarriers(carrierList);
+        }
+      } catch (error) {
+        console.error('Error fetching carriers:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchCarriers();
+  }, [currentUser]);
+
+  const tabs = [
+    { id: 'all', label: `All (${carriers.length})` },
+    { id: 'active', label: `Active (${carriers.filter(c => c.status === 'active').length})` },
+    { id: 'pending', label: 'Pending (0)' },
+    { id: 'compliance', label: 'Compliance (0)' },
+    { id: 'blocked', label: 'Blocked (0)' }
+  ];
+
+  // Filter carriers based on active tab
+  const filteredCarriers = carriers.filter(carrier => {
+    if (activeTab === 'all') return true;
+    if (activeTab === 'active') return carrier.status === 'active';
+    // Add more filters as needed
+    return false;
+  });
 
   return (
     <div className="fp-dashboard-root shipper-mycarriers">
@@ -23,7 +69,6 @@ export default function MyCarriers() {
             <p className="fp-subtitle">Welcome back! Here's what's happening with your fleet today.</p>
           </div>
           <div className="sd-carrier-row-options">
-            <button className="btn small-cd" onClick={() => setIsInviteOpen(true)}><i className="fa-solid fa-plus" aria-hidden="true" />Invite Carrier</button>
             <button className="btn small ghost-cd"><i className="fa-solid fa-upload" aria-hidden="true" />Upload Document</button>
             <button className="btn small ghost-cd"><i className="fa-solid fa-download" aria-hidden="true" />Export List</button>
           </div>
@@ -33,32 +78,32 @@ export default function MyCarriers() {
       <section className="cards-row">
         <div className="sd-stat-card">
           <div className="sd-stat-label">Total Carriers</div>
-          <div className="sd-stat-value">1,247</div>
+          <div className="sd-stat-value">{loading ? '...' : carriers.length}</div>
           <div className="sd-stat-icon"><i className="fa-solid fa-truck" aria-hidden="true"></i></div>
         </div>
         <div className="sd-stat-card">
           <div className="sd-stat-label">Active Carriers</div>
-          <div className="sd-stat-value">1,089</div>
+          <div className="sd-stat-value">{loading ? '...' : carriers.filter(c => c.status === 'active').length}</div>
           <div className="sd-stat-icon"><i className="fa-solid fa-check" aria-hidden="true"></i></div>
         </div>
         <div className="sd-stat-card">
           <div className="sd-stat-label">Pending Invites</div>
-          <div className="sd-stat-value">43</div>
+          <div className="sd-stat-value">0</div>
           <div className="sd-stat-icon"><i className="fa-solid fa-hourglass" aria-hidden="true"></i></div>
         </div>
         <div className="sd-stat-card">
           <div className="sd-stat-label">Compliance Risk</div>
-          <div className="sd-stat-value">27</div>
+          <div className="sd-stat-value">0</div>
           <div className="sd-stat-icon"><i className="fa-solid fa-exclamation" aria-hidden="true"></i></div>
         </div>
         <div className="sd-stat-card">
           <div className="sd-stat-label">Avg Rating</div>
-          <div className="sd-stat-value">4.6★</div>
+          <div className="sd-stat-value">{loading ? '...' : (carriers.length > 0 ? (carriers.reduce((sum, c) => sum + (c.rating || 0), 0) / carriers.length).toFixed(1) : 0)}★</div>
           <div className="sd-stat-icon"><i className="fa-solid fa-star" aria-hidden="true"></i></div>
         </div>
         <div className="sd-stat-card">
-          <div className="sd-stat-label">Avg On-Time %</div>
-          <div className="sd-stat-value">92.4%</div>
+          <div className="sd-stat-label">Total Loads</div>
+          <div className="sd-stat-value">{loading ? '...' : carriers.reduce((sum, c) => sum + (c.total_loads || 0), 0)}</div>
           <div className="sd-stat-icon"><i className="fa-solid fa-clock" aria-hidden="true"></i></div>
         </div>
       </section>
@@ -99,57 +144,64 @@ export default function MyCarriers() {
           <div className="th name">Carrier Name</div>
           <div className="th mc">MC#/DOT</div>
           <div className="th rating">Rating</div>
-          <div className="th ontime">On-Time %</div>
           <div className="th loads">Loads</div>
-          <div className="th last">Last Load</div>
-          <div className="th docs">Docs Valid</div>
-          <div className="th equip">Equipment</div>
+          <div className="th status">Status</div>
+          <div className="th contact">Contact</div>
           <div className="">Actions</div>
         </div>
 
-  <div className="sb-table-row">
-          <div className="sb-td check"><input type="checkbox" /></div>
-          <div className="sb-td name">
-            <div className="avatar">ST</div>
-            <div>
-              <div className="carrier-title">Swift Transportation</div>
-              <div className="carrier-sub muted">Phoenix, AZ</div>
-            </div>
+        {loading ? (
+          <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
+            <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '24px', marginBottom: '8px' }}></i>
+            <p>Loading carriers...</p>
           </div>
-          <div className="td mc">MC-138549 / 695802</div>
-          <div className="td rating">4.8</div>
-          <div className="td ontime">94.2%</div>
-          <div className="td loads">1,247</div>
-          <div className="td last">2 days ago</div>
-          <div className="td docs"><span className="int-status-badge active">Valid</span></div>
-          <div className="td equip"><span className="int-status-badge blue">Dry Van</span> <span className="int-status-badge blue">Reefer</span></div>
-          <div className="td actions"><i className="fa-solid fa-ellipsis-h"></i></div>
-        </div>
-
-  <div className="sb-table-row">
-          <div className="sb-td check"><input type="checkbox" /></div>
-          <div className="sb-td name">
-            <div className="avatar">JH</div>
-            <div>
-              <div className="carrier-title">J.B. Hunt Transport</div>
-              <div className="carrier-sub muted">Lowell, AR</div>
-            </div>
+        ) : filteredCarriers.length === 0 ? (
+          <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
+            <i className="fa-solid fa-inbox" style={{ fontSize: '32px', marginBottom: '8px', opacity: 0.3 }}></i>
+            <p>No carriers found. Sign up as a carrier to see them appear here.</p>
           </div>
-          <div className="td mc">MC-87113 / 395463</div>
-          <div className="td rating">4.6</div>
-          <div className="td ontime">91.8%</div>
-          <div className="td loads">892</div>
-          <div className="td last">1 week ago</div>
-          <div className="td docs"><span className="int-status-badge warning">Expiring</span></div>
-          <div className="td equip"><span className="int-status-badge blue">Dry Van</span> <span className="int-status-badge blue">Flatbed</span></div>
-          <div className=""><i className="fa-solid fa-ellipsis-h"></i></div>
-        </div>
+        ) : (
+          filteredCarriers.map((carrier, index) => (
+            <div className="sb-table-row" key={carrier.id || index}>
+              <div className="sb-td check"><input type="checkbox" /></div>
+              <div className="sb-td name">
+                <div className="avatar">{carrier.name?.slice(0, 2).toUpperCase() || 'NA'}</div>
+                <div>
+                  <div className="sb-td-name">{carrier.name || 'Unknown Carrier'}</div>
+                  <div className="sb-td-sub">{carrier.company_name || 'N/A'}</div>
+                </div>
+              </div>
+              <div className="sb-td mc">
+                <div>{carrier.mc_number || 'N/A'}</div>
+                <div className="sb-td-sub">{carrier.dot_number || 'N/A'}</div>
+              </div>
+              <div className="sb-td rating">
+                <span className="sb-star">★</span> {carrier.rating || 0}
+              </div>
+              <div className="sb-td loads">{carrier.total_loads || 0}</div>
+              <div className="sb-td status">
+                <span className={`int-status-badge ${carrier.status === 'active' ? 'green' : 'gray'}`}>
+                  {carrier.status || 'Unknown'}
+                </span>
+              </div>
+              <div className="sb-td contact">
+                <div>{carrier.email || 'N/A'}</div>
+                <div className="sb-td-sub">{carrier.phone || 'N/A'}</div>
+              </div>
+              <div className="sb-td">
+                <button className="sb-action-btn" title="View Profile">
+                  <i className="fa-solid fa-eye"></i>
+                </button>
+                <button className="sb-action-btn" title="Send Message">
+                  <i className="fa-solid fa-envelope"></i>
+                </button>
+              </div>
+            </div>
+          ))
+        )}
 
         </div>
       </section>
-
-      {/* Invite Carrier Modal */}
-      <InviteCarrierModal isOpen={isInviteOpen} onClose={() => setIsInviteOpen(false)} />
     </div>
   );
 }

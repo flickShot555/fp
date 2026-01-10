@@ -1,15 +1,141 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import { API_URL } from '../../config';
 import '../../styles/carrier/AlertsNotifications.css';
 
 const AlertsNotifications = () => {
+  const { currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState('Notification Center');
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All Categories');
   const [statusFilter, setStatusFilter] = useState('All Status');
+  const [notifications, setNotifications] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [unreadCount, setUnreadCount] = useState(0);
 
-  // Mock notifications data
-  const notifications = [
+  // Fetch notifications from API
+  useEffect(() => {
+    if (currentUser && activeTab === 'Notification Center') {
+      fetchNotifications();
+    }
+  }, [currentUser, activeTab]);
+
+  const fetchNotifications = async () => {
+    if (!currentUser) return;
+    
+    setLoading(true);
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(`${API_URL}/notifications?page=1&page_size=50`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const formattedNotifications = (data.notifications || []).map(notif => {
+          // Map notification type to category
+          let type = 'System';
+          let priority = 'Info';
+          let icon = 'fa-solid fa-bell';
+          let bgColor = '#eff6ff';
+          let borderColor = '#bfdbfe';
+
+          if (notif.notification_type === 'system') {
+            type = 'System';
+            if (notif.title?.toLowerCase().includes('invitation')) {
+              type = 'Partnership';
+              priority = 'Info';
+              icon = 'fa-solid fa-handshake';
+              bgColor = '#f0fdf4';
+              borderColor = '#bbf7d0';
+            }
+          } else if (notif.notification_type === 'load_update') {
+            type = 'Loads';
+            icon = 'fa-solid fa-box';
+          } else if (notif.notification_type === 'compliance_alert') {
+            type = 'Compliance';
+            priority = 'Critical';
+            icon = 'fa-solid fa-exclamation-triangle';
+            bgColor = '#fef2f2';
+            borderColor = '#fecaca';
+          } else if (notif.notification_type === 'payment') {
+            type = 'Finance';
+            priority = 'Success';
+            icon = 'fa-solid fa-dollar-sign';
+            bgColor = '#f0fdf4';
+            borderColor = '#bbf7d0';
+          }
+
+          return {
+            id: notif.id,
+            type: type,
+            priority: priority,
+            title: notif.title,
+            description: notif.message,
+            timestamp: notif.relative_time || notif.formatted_time || 'Recently',
+            actions: notif.action_url ? ['View Details'] : [],
+            isRead: notif.is_read || false,
+            icon: icon,
+            bgColor: bgColor,
+            borderColor: borderColor,
+            actionUrl: notif.action_url,
+            resourceType: notif.resource_type,
+            resourceId: notif.resource_id
+          };
+        });
+        
+        setNotifications(formattedNotifications);
+        setUnreadCount(data.unread_count || 0);
+      }
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleMarkAsRead = async (notificationId) => {
+    if (!currentUser) return;
+
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(`${API_URL}/notifications/${notificationId}/mark-read`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        // Update local state
+        setNotifications(prev => prev.map(n => 
+          n.id === notificationId ? { ...n, isRead: true } : n
+        ));
+        setUnreadCount(prev => Math.max(0, prev - 1));
+      }
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+    }
+  };
+
+  const handleActionClick = (notification) => {
+    if (notification.actionUrl) {
+      // Navigate to the action URL (could be an invitation, relationship, etc.)
+      window.location.href = notification.actionUrl;
+    }
+    // Mark as read when action is clicked
+    if (!notification.isRead) {
+      handleMarkAsRead(notification.id);
+    }
+  };
+
+  // Mock notifications data (fallback)
+  const mockNotifications = [
     {
       id: 1,
       type: 'Compliance',
@@ -80,7 +206,9 @@ const AlertsNotifications = () => {
   const categories = ['All Categories', 'Compliance', 'Loads', 'Finance', 'Driver/Dispatch', 'System'];
   const statuses = ['All Status', 'Unread', 'Read', 'Critical', 'Warning'];
 
-  const filteredNotifications = notifications.filter(notification => {
+  const displayNotifications = loading ? [] : (notifications.length > 0 ? notifications : mockNotifications);
+
+  const filteredNotifications = displayNotifications.filter(notification => {
     const matchesSearch = notification.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          notification.description.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = categoryFilter === 'All Categories' || notification.type === categoryFilter;
@@ -176,7 +304,15 @@ const AlertsNotifications = () => {
                 ))}
               </select>
               
-              <button className="btn small-cd">
+              <button 
+                className="btn small-cd"
+                onClick={async () => {
+                  if (!currentUser || notifications.length === 0) return;
+                  for (const notif of notifications.filter(n => !n.isRead)) {
+                    await handleMarkAsRead(notif.id);
+                  }
+                }}
+              >
                 Mark All as Read
               </button>
             </div>
@@ -184,46 +320,64 @@ const AlertsNotifications = () => {
 
           {/* Notifications List */}
           <div className="alert-notifications-container">
-            {filteredNotifications.map(notification => (
-              <div 
-                key={notification.id}
-                className={`alert-notification-card ${!notification.isRead ? 'unread' : ''}`}
-                data-type={notification.type}
-              >
-                <div className="alert-notification-header">
-                  <div className="alert-notification-meta">
-                    <span className="alert-notification-icon">
-                  <i className={notification.icon}></i>
-                    </span>
-                    <span className="alert-notification-type">{notification.type}</span>
-                    <span className={`alert-priority-badge ${getPriorityBadgeClass(notification.priority)}`}>
-                      {notification.priority}
-                    </span>
-                    <span className="alert-notification-time">{notification.timestamp}</span>
+            {loading ? (
+              <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
+                <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '24px', marginBottom: '8px' }}></i>
+                <p>Loading notifications...</p>
+              </div>
+            ) : (
+              <>
+                {filteredNotifications.map(notification => (
+                  <div 
+                    key={notification.id}
+                    className={`alert-notification-card ${!notification.isRead ? 'unread' : ''}`}
+                    data-type={notification.type}
+                    onClick={() => !notification.isRead && handleMarkAsRead(notification.id)}
+                    style={{ cursor: !notification.isRead ? 'pointer' : 'default' }}
+                  >
+                    <div className="alert-notification-header">
+                      <div className="alert-notification-meta">
+                        <span className="alert-notification-icon">
+                          <i className={notification.icon}></i>
+                        </span>
+                        <span className="alert-notification-type">{notification.type}</span>
+                        <span className={`alert-priority-badge ${getPriorityBadgeClass(notification.priority)}`}>
+                          {notification.priority}
+                        </span>
+                        <span className="alert-notification-time">{notification.timestamp}</span>
+                      </div>
+                      {!notification.isRead && <div className="alert-unread-indicator"></div>}
+                    </div>
+                    
+                    <div className="alert-notification-content">
+                      <h3 className="alert-notification-title">{notification.title}</h3>
+                      <p className="alert-notification-description">{notification.description}</p>
+                    </div>
+                    
+                    <div className="alert-notification-actions">
+                      {notification.actions.map((action, index) => (
+                        <button 
+                          key={index} 
+                          className="alert-action-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleActionClick(notification);
+                          }}
+                        >
+                          {action}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  {!notification.isRead && <div className="alert-unread-indicator"></div>}
-                </div>
+                ))}
                 
-                <div className="alert-notification-content">
-                  <h3 className="alert-notification-title">{notification.title}</h3>
-                  <p className="alert-notification-description">{notification.description}</p>
-                </div>
-                
-                <div className="alert-notification-actions">
-                  {notification.actions.map((action, index) => (
-                    <button key={index} className="alert-action-btn">
-                      {action}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-            
-            {filteredNotifications.length === 0 && (
-              <div className="alert-no-notifications">
-                <i className="fas fa-bell-slash"></i>
-                <p>No notifications found matching your filters.</p>
-              </div>
+                {filteredNotifications.length === 0 && (
+                  <div className="alert-no-notifications">
+                    <i className="fas fa-bell-slash"></i>
+                    <p>No notifications found matching your filters.</p>
+                  </div>
+                )}
+              </>
             )}
           </div>
 

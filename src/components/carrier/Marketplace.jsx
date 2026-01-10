@@ -29,6 +29,24 @@ export default function Marketplace({ activeSection, setActiveSection }) {
   const [missingConsents, setMissingConsents] = useState([])
   const [gatingReason, setGatingReason] = useState('')
 
+  // Real-time marketplace loads from shippers
+  const [loads, setLoads] = useState([])
+  const [loadsLoading, setLoadsLoading] = useState(false)
+
+  // Drivers state
+  const [drivers, setDrivers] = useState([])
+  const [driversLoading, setDriversLoading] = useState(false)
+  const [hiringDriver, setHiringDriver] = useState(null)
+
+  // Bidding state
+  const [bidModalOpen, setBidModalOpen] = useState(false)
+  const [detailsModalOpen, setDetailsModalOpen] = useState(false)
+  const [selectedLoad, setSelectedLoad] = useState(null)
+  const [bidRate, setBidRate] = useState('')
+  const [bidNotes, setBidNotes] = useState('')
+  const [bidEta, setBidEta] = useState('')
+  const [submittingBid, setSubmittingBid] = useState(false)
+
   // Check onboarding status AND consent eligibility to gate marketplace
   useEffect(() => {
     const checkMarketplaceAccess = async () => {
@@ -116,6 +134,270 @@ export default function Marketplace({ activeSection, setActiveSection }) {
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
   }, [])
+
+  // Fetch marketplace loads (shipper-posted loads for carriers)
+  const fetchMarketplaceLoads = async () => {
+    if (!currentUser || !isMarketplaceReady) return
+
+    setLoadsLoading(true)
+    try {
+      const token = await currentUser.getIdToken()
+      const response = await fetch(`${API_URL}/marketplace/loads`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        // Convert backend loads to UI format
+        const formattedLoads = (data.loads || []).map(load => ({
+          id: load.load_id,
+          origin: load.origin || 'N/A',
+          destination: load.destination || 'N/A',
+          pickupDate: load.pickup_date || 'TBD',
+          deliveryDate: load.delivery_date ? `Delivery: ${load.delivery_date}` : 'TBD',
+          rate: load.rate ? `$${load.rate}` : 'Negotiable',
+          perMile: load.rate_per_mile ? `$${load.rate_per_mile}/mile` : 'N/A',
+          status: load.status || 'posted',
+          postedTime: load.created_at ? formatTimeAgo(load.created_at) : 'Recently posted',
+          carrier: load.equipment_type || 'Dry Van',
+          distance: load.distance ? `${load.distance} miles` : 'N/A',
+          urgency: load.urgency || 'normal',
+          // Add offer tracking
+          offers: load.offers || [],
+          myOffer: (load.offers || []).find(o => o.carrier_id === currentUser?.uid)
+        }))
+        setLoads(formattedLoads)
+      }
+    } catch (error) {
+      console.error('Error fetching marketplace loads:', error)
+      setLoads([]) // Show empty on error
+    } finally {
+      setLoadsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchMarketplaceLoads()
+  }, [currentUser, isMarketplaceReady])
+
+  // Fetch marketplace drivers
+  const fetchMarketplaceDrivers = async () => {
+    if (!currentUser || !isMarketplaceReady) return
+
+    setDriversLoading(true)
+    try {
+      const token = await currentUser.getIdToken()
+      const response = await fetch(`${API_URL}/drivers?available_only=true`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        // Format drivers for UI
+        const formattedDrivers = (data.drivers || []).map(driver => {
+          // Build endorsements array
+          const endorsements = []
+          if (driver.hazmat_endorsement) endorsements.push('Hazmat')
+          if (driver.tanker_endorsement) endorsements.push('Tanker')
+          if (driver.doubles_triples) endorsements.push('Double/Triple')
+          if (driver.passenger_endorsement) endorsements.push('Passenger')
+          if (endorsements.length === 0) endorsements.push('None')
+
+          // Build equipment/compliance tags
+          const equipmentTypes = []
+          if (driver.cdl_verified) equipmentTypes.push('CDL Valid')
+          if (driver.medical_card_verified) equipmentTypes.push('Med Card Active')
+          if (driver.drug_test_status === 'passed') equipmentTypes.push('MVR Clean')
+
+          return {
+            id: driver.id || driver.driver_id,
+            name: driver.name || 'Unknown Driver',
+            rating: driver.rating || 0,
+            trips: driver.total_deliveries || driver.total_loads || 0,
+            class: driver.cdl_class ? `${driver.cdl_class} - ${driver.cdl_state || ''}` : 'N/A',
+            location: driver.current_location || driver.current_city || 'Unknown',
+            experience: driver.years_experience ? `${driver.years_experience} years` : 'N/A',
+            endorsements: endorsements,
+            safetyScore: driver.safety_score || 0,
+            onTime: driver.on_time_rate ? driver.on_time_rate >= 0.95 : false,
+            available: driver.status === 'available',
+            photo: `https://ui-avatars.com/api/?name=${encodeURIComponent(driver.name || 'Driver')}&background=random`,
+            lastActivity: 'Recently active',
+            equipmentTypes: equipmentTypes.length > 0 ? equipmentTypes : ['Pending Verification']
+          }
+        })
+        setDrivers(formattedDrivers)
+      }
+    } catch (error) {
+      console.error('Error fetching marketplace drivers:', error)
+      setDrivers([])
+    } finally {
+      setDriversLoading(false)
+    }
+  }
+
+  // Hire a driver
+  const handleHireDriver = async (driver) => {
+    if (!currentUser) return
+
+    setHiringDriver(driver.id)
+    try {
+      const token = await currentUser.getIdToken()
+      const response = await fetch(`${API_URL}/drivers/${driver.id}/hire`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (response.ok) {
+        // Remove driver from list (since they're now hired)
+        setDrivers(drivers.filter(d => d.id !== driver.id))
+        alert(`Successfully hired ${driver.name}!`)
+      } else {
+        const error = await response.json()
+        alert(`Failed to hire driver: ${error.detail || 'Unknown error'}`)
+      }
+    } catch (error) {
+      console.error('Error hiring driver:', error)
+      alert('Failed to hire driver. Please try again.')
+    } finally {
+      setHiringDriver(null)
+    }
+  }
+
+  // Fetch drivers when drivers tab is active
+  useEffect(() => {
+    if (activeTab === 'drivers' && isMarketplaceReady) {
+      fetchMarketplaceDrivers()
+    }
+  }, [activeTab, currentUser, isMarketplaceReady])
+
+  // Open bid modal
+  const handleOpenBidModal = (load) => {
+    setSelectedLoad(load)
+    setBidRate(load.rate.replace('$', '').replace(',', '') || '')
+    setBidNotes('')
+    setBidEta('')
+    setBidModalOpen(true)
+  }
+
+  // Open details modal
+  const handleOpenDetailsModal = async (load) => {
+    if (!currentUser) return;
+    
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(`${API_URL}/loads/${load.id}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Merge the detailed load data with the existing load data
+        const detailedLoad = {
+          ...load,
+          ...data.load,
+          // Map backend fields to frontend format
+          pickup_city: data.load.origin_city || data.load.origin?.split(',')[0] || load.origin?.split(',')[0] || '',
+          pickup_state: data.load.origin_state || data.load.origin?.split(',')[1]?.trim() || '',
+          pickup_zip: data.load.origin_zip || '',
+          delivery_city: data.load.destination_city || data.load.destination?.split(',')[0] || load.destination?.split(',')[0] || '',
+          delivery_state: data.load.destination_state || data.load.destination?.split(',')[1]?.trim() || '',
+          delivery_zip: data.load.destination_zip || '',
+          pickup_date: data.load.pickup_date || load.pickupDate,
+          delivery_date: data.load.delivery_date || load.deliveryDate,
+          equipment_type: data.load.equipment_type || load.carrier,
+          weight: data.load.weight || '',
+          distance: data.load.miles || data.load.distance || load.distance,
+          rate: data.load.rate || load.rate?.replace('$', '').replace(',', '') || '',
+          special_instructions: data.load.special_instructions || data.load.notes || '',
+          // Additional stops/routes with dates
+          additional_stops: data.load.additional_stops || data.load.additional_routes || [],
+          additional_routes: data.load.additional_routes || data.load.additional_stops || [],
+          // Shipper information
+          shipper_info: data.load.shipper_info || {},
+          shipper_company_name: data.load.shipper_company_name || data.load.shipper_info?.company_name || '',
+          shipper_compliance_score: data.load.shipper_compliance_score !== undefined ? data.load.shipper_compliance_score : null,
+          // Total distance and price
+          total_distance: data.load.total_distance || data.load.estimated_distance || data.load.miles || data.load.distance || null,
+          total_price: data.load.total_price || data.load.total_rate || data.load.linehaul_rate || data.load.rate || null
+        };
+        setSelectedLoad(detailedLoad);
+        setDetailsModalOpen(true);
+      } else {
+        // If we can't fetch details, still show the modal with available data
+        setSelectedLoad(load);
+        setDetailsModalOpen(true);
+      }
+    } catch (error) {
+      console.error('Error fetching load details:', error);
+      // Still show modal with available data
+      setSelectedLoad(load);
+      setDetailsModalOpen(true);
+    }
+  }
+
+  // Submit bid
+  const handleSubmitBid = async () => {
+    if (!selectedLoad || !bidRate) {
+      alert('Please enter a bid rate')
+      return
+    }
+
+    setSubmittingBid(true)
+    try {
+      const token = await currentUser.getIdToken()
+      const response = await fetch(`${API_URL}/loads/${selectedLoad.id}/tender-offer`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          rate: parseFloat(bidRate),
+          notes: bidNotes || '',
+          eta: bidEta || ''
+        })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        alert('Bid submitted successfully!')
+        setBidModalOpen(false)
+        // Refresh loads to show new bid status
+        await fetchMarketplaceLoads()
+      } else {
+        const error = await response.json()
+        alert(`Failed to submit bid: ${error.detail || 'Unknown error'}`)
+      }
+    } catch (error) {
+      console.error('Error submitting bid:', error)
+      alert('Failed to submit bid. Please try again.')
+    } finally {
+      setSubmittingBid(false)
+    }
+  }
+
+  // Helper function to format timestamp
+  const formatTimeAgo = (timestamp) => {
+    const now = Date.now() / 1000
+    const diff = now - timestamp
+    const hours = Math.floor(diff / 3600)
+    if (hours < 1) return 'Posted < 1h ago'
+    if (hours === 1) return 'Posted 1h ago'
+    return `Posted ${hours}h ago`
+  }
 
   // Show loading state while checking access
   if (checkingAccess) {
@@ -313,135 +595,6 @@ export default function Marketplace({ activeSection, setActiveSection }) {
     )
   }
 
-  // Mock drivers data
-  const drivers = [
-    {
-      id: 1,
-      name: 'Marcus Johnson',
-      rating: 4.8,
-      trips: 127,
-      class: 'A - TX',
-      location: 'Dallas, TX',
-      experience: '5 years',
-      endorsements: ['Hazmat', 'Tanker', 'Double/Triple'],
-      safetyScore: 95,
-      onTime: true,
-      available: true,
-      photo: 'https://randomuser.me/api/portraits/men/32.jpg',
-      lastActivity: '2 days ago',
-      equipmentTypes: ['CDL Valid', 'Med Card Active', 'MVR Clean']
-    },
-    {
-      id: 2,
-      name: 'Sarah Williams',
-      rating: 4.4,
-      trips: 89,
-      class: 'A - CA',
-      location: 'Los Angeles, CA',
-      experience: '3 years',
-      endorsements: ['Hazmat', 'Passenger'],
-      safetyScore: 92,
-      onTime: true,
-      available: true,
-      photo: 'https://randomuser.me/api/portraits/women/44.jpg',
-      lastActivity: '1 day ago',
-      equipmentTypes: ['CDL Valid', 'Med Card Active', 'MVR Clean']
-    },
-    {
-      id: 3,
-      name: 'Robert Martinez',
-      rating: 4.7,
-      trips: 203,
-      class: 'A - FL',
-      location: 'Miami, FL',
-      experience: '7 years',
-      endorsements: ['Tanker', 'Double/Triple'],
-      safetyScore: 98,
-      onTime: false,
-      available: true,
-      photo: 'https://randomuser.me/api/portraits/men/67.jpg',
-      lastActivity: '5 hours ago',
-      equipmentTypes: ['CDL Valid', 'Med Card Active', 'MVR Clean']
-    },
-    {
-      id: 4,
-      name: 'Jennifer Davis',
-      rating: 5.0,
-      trips: 45,
-      class: 'A - NY',
-      location: 'Buffalo, NY',
-      experience: '2 years',
-      endorsements: ['Hazmat', 'Tanker', 'Double/Triple', 'Passenger'],
-      safetyScore: 100,
-      onTime: true,
-      available: true,
-      photo: 'https://randomuser.me/api/portraits/women/68.jpg',
-      lastActivity: '3 hours ago',
-      equipmentTypes: ['CDL Valid', 'Med Card Active', 'MVR Clean']
-    },
-    {
-      id: 5,
-      name: 'David Thompson',
-      rating: 4.6,
-      trips: 156,
-      class: 'B - IL',
-      location: 'Chicago, IL',
-      experience: '4 years',
-      endorsements: ['None'],
-      safetyScore: 88,
-      onTime: false,
-      available: false,
-      photo: 'https://randomuser.me/api/portraits/men/71.jpg',
-      lastActivity: '2 hours ago',
-      equipmentTypes: ['CDL Expiring', 'Med Card Active', 'MVR Clear']
-    }
-  ]
-
-  // Mock loads data
-  const loads = [
-    {
-      id: 1,
-      origin: 'Chicago, IL',
-      destination: 'Dallas, TX',
-      pickupDate: 'Dec 10, 2024',
-      deliveryDate: 'Delivery: Dec 12, 2024',
-      rate: '$2,850',
-      perMile: '$1.75/mile',
-      status: 'Active',
-      postedTime: 'Posted 1h ago',
-      carrier: 'Sky Jet',
-      distance: '925 miles',
-      urgency: 'normal'
-    },
-    {
-      id: 2,
-      origin: 'Atlanta, GA',
-      destination: 'Miami, FL',
-      pickupDate: 'Dec 16, 2024',
-      deliveryDate: 'Delivery: Dec 18, 2024',
-      rate: '$1,950',
-      perMile: '$3.12/mile',
-      status: 'Pending',
-      postedTime: 'Posted 4h ago',
-      carrier: 'Reefer',
-      distance: '662 miles',
-      urgency: 'normal'
-    },
-    {
-      id: 3,
-      origin: 'Los Angeles, CA',
-      destination: 'Phoenix, AZ',
-      pickupDate: 'Dec 4, 2024',
-      deliveryDate: 'Delivery: Dec 12, 2024',
-      rate: '$1,200',
-      perMile: '$3.18/mile',
-      status: 'Urgent',
-      postedTime: 'Posted 8h ago',
-      carrier: 'Flatbed',
-      distance: '372 miles',
-      urgency: 'urgent'
-    }
-  ]
 
   return (
     <div className="marketplace">
@@ -584,12 +737,81 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                     <i className="fa-solid fa-route" />
                     {load.distance}
                   </div>
+                  {load.load_type && (
+                    <div className="load-type-badge" style={{
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      fontSize: '12px',
+                      fontWeight: '600',
+                      background: load.load_type === 'Full Truckload' || load.load_type === 'FTL' ? '#dbeafe' : '#fef3c7',
+                      color: load.load_type === 'Full Truckload' || load.load_type === 'FTL' ? '#1e40af' : '#92400e'
+                    }}>
+                      {load.load_type === 'Full Truckload' ? 'FTL' : load.load_type === 'LTL' ? 'LTL' : load.load_type}
+                    </div>
+                  )}
+                  {load.additional_routes && load.additional_routes.length > 0 && (
+                    <div style={{
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      fontSize: '11px',
+                      fontWeight: '600',
+                      background: '#e0e7ff',
+                      color: '#3730a3',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}>
+                      <i className="fa-solid fa-route"></i>
+                      +{load.additional_routes.length} stops
+                    </div>
+                  )}
                 </div>
               </div>
 
               <div className="load-actions">
-                <button className="btn small-cd" style={{width: '100%'}}>Bid/Counter</button>
-                <button className="btn small ghost-cd"style={{width: '100%'}}>Accept</button>
+                {load.myOffer ? (
+                  <>
+                    <div className="my-offer-status" style={{
+                      padding: '10px',
+                      background: load.myOffer.status === 'accepted' ? '#10b981' : 
+                                 load.myOffer.status === 'rejected' ? '#ef4444' : '#3b82f6',
+                      color: 'white',
+                      borderRadius: '8px',
+                      textAlign: 'center',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      marginBottom: '8px'
+                    }}>
+                      {load.myOffer.status === 'accepted' ? '✓ Bid Accepted' :
+                       load.myOffer.status === 'rejected' ? '✗ Bid Rejected' :
+                       '⏳ Bid Request Sent'}
+                    </div>
+                    <button 
+                      className="btn small ghost-cd" 
+                      style={{width: '100%'}}
+                      onClick={() => handleOpenDetailsModal(load)}
+                    >
+                      View Details
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button 
+                      className="btn small-cd" 
+                      style={{width: '100%'}}
+                      onClick={() => handleOpenBidModal(load)}
+                    >
+                      Submit Bid
+                    </button>
+                    <button 
+                      className="btn small ghost-cd" 
+                      style={{width: '100%'}}
+                      onClick={() => handleOpenDetailsModal(load)}
+                    >
+                      View Details
+                    </button>
+                  </>
+                )}
               </div>
 
               <div className="posted-time">{load.postedTime}</div>
@@ -687,6 +909,17 @@ export default function Marketplace({ activeSection, setActiveSection }) {
           </button>
             </div>
 
+          {driversLoading ? (
+            <div style={{ padding: '40px', textAlign: 'center' }}>
+              <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '24px', marginRight: '10px' }}></i>
+              Loading drivers...
+            </div>
+          ) : drivers.length === 0 ? (
+            <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
+              <i className="fa-solid fa-users" style={{ fontSize: '48px', marginBottom: '20px', opacity: 0.5 }}></i>
+              <p>No available drivers found</p>
+            </div>
+          ) : (
           <div className="marketplace-drivers-list">
             {drivers.map(driver => (
               <div key={driver.id} className="marketplace-driver-card">
@@ -755,9 +988,13 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                   </div>
                   
                   <div className="marketplace-driver-actions">
-                    <button className={`marketplace-btn-hire ${driver.available ? 'available' : 'unavailable'}`}>
+                    <button 
+                      className={`marketplace-btn-hire ${driver.available ? 'available' : 'unavailable'}`}
+                      onClick={() => handleHireDriver(driver)}
+                      disabled={hiringDriver === driver.id || !driver.available}
+                    >
                       <i className="fa-solid fa-plus" />
-                      Hire Driver
+                      {hiringDriver === driver.id ? 'Hiring...' : 'Hire Driver'}
                     </button>
                     <div className="marketplace-driver-menu">
                       <button className="marketplace-menu-btn" title="View Details">
@@ -775,19 +1012,13 @@ export default function Marketplace({ activeSection, setActiveSection }) {
               </div>
             ))}
           </div>
+          )}
 
-          <div className="drivers-pagination">
-            <span>Showing 1-5 of 1,247 drivers</span>
-            <div className="pagination">
-              <button aria-label="Previous page">&lt;</button>
-              <button className="active" aria-current="page">1</button>
-              <button>2</button>
-              <button>3</button>
-              <span>...</span>
-              <button>25</button>
-              <button aria-label="Next page">&gt;</button>
+          {!driversLoading && drivers.length > 0 && (
+            <div className="drivers-pagination">
+              <span>Showing {drivers.length} driver{drivers.length !== 1 ? 's' : ''}</span>
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -1107,6 +1338,442 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Bid Modal */}
+      {bidModalOpen && selectedLoad && (
+        <div className="modal-overlay" onClick={() => setBidModalOpen(false)} style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999
+        }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{
+            maxWidth: '500px',
+            padding: '30px',
+            background: 'white',
+            borderRadius: '12px',
+            boxShadow: '0 10px 40px rgba(0,0,0,0.2)',
+            maxHeight: '90vh',
+            overflowY: 'auto'
+          }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '20px'
+            }}>
+              <h2 style={{ margin: 0, fontSize: '24px', color: '#1e293b' }}>Submit Bid</h2>
+              <button 
+                onClick={() => setBidModalOpen(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  color: '#64748b'
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ marginBottom: '20px', padding: '15px', background: '#f8fafc', borderRadius: '8px' }}>
+              <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '8px' }}>Load Route</div>
+              <div style={{ fontSize: '18px', fontWeight: '600', color: '#1e293b' }}>
+                {selectedLoad.origin} → {selectedLoad.destination}
+              </div>
+              <div style={{ fontSize: '14px', color: '#64748b', marginTop: '8px' }}>
+                Pickup: {selectedLoad.pickupDate} | {selectedLoad.distance}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#1e293b' }}>
+                Your Bid Rate ($) *
+              </label>
+              <input
+                type="number"
+                value={bidRate}
+                onChange={(e) => setBidRate(e.target.value)}
+                placeholder="Enter your bid amount"
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '8px',
+                  fontSize: '16px'
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#1e293b' }}>
+                Estimated Delivery Time (Optional)
+              </label>
+              <input
+                type="text"
+                value={bidEta}
+                onChange={(e) => setBidEta(e.target.value)}
+                placeholder="e.g., 2 days, Dec 28"
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '8px',
+                  fontSize: '16px'
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '25px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#1e293b' }}>
+                Notes (Optional)
+              </label>
+              <textarea
+                value={bidNotes}
+                onChange={(e) => setBidNotes(e.target.value)}
+                placeholder="Any additional information for the shipper..."
+                rows={4}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  resize: 'vertical'
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button
+                onClick={handleSubmitBid}
+                disabled={submittingBid || !bidRate}
+                className="btn"
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  background: submittingBid || !bidRate ? '#cbd5e1' : '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: submittingBid || !bidRate ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {submittingBid ? 'Submitting...' : 'Submit Bid'}
+              </button>
+              <button
+                onClick={() => setBidModalOpen(false)}
+                className="btn ghost-cd"
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  background: 'transparent',
+                  color: '#64748b',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Load Details Modal */}
+      {detailsModalOpen && selectedLoad && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 9999
+          }}
+          onClick={() => setDetailsModalOpen(false)}
+        >
+          <div
+            style={{
+              backgroundColor: 'white',
+              padding: '30px',
+              borderRadius: '8px',
+              maxWidth: '700px',
+              width: '90%',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ marginBottom: '20px', fontSize: '24px', fontWeight: '700', color: '#333' }}>
+              Load Details
+            </h2>
+
+            {/* Route Information */}
+            <div style={{ marginBottom: '25px' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#555', marginBottom: '15px' }}>
+                Route Information
+              </h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                <div>
+                  <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
+                    <strong>Pickup Location:</strong>
+                  </p>
+                  <p style={{ fontSize: '14px', color: '#333' }}>
+                    {selectedLoad.pickup_city || selectedLoad.origin || 'N/A'}
+                    {selectedLoad.pickup_state && `, ${selectedLoad.pickup_state}`}
+                    {selectedLoad.pickup_zip && ` ${selectedLoad.pickup_zip}`}
+                  </p>
+                </div>
+                <div>
+                  <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
+                    <strong>Delivery Location:</strong>
+                  </p>
+                  <p style={{ fontSize: '14px', color: '#333' }}>
+                    {selectedLoad.delivery_city || selectedLoad.destination || 'N/A'}
+                    {selectedLoad.delivery_state && `, ${selectedLoad.delivery_state}`}
+                    {selectedLoad.delivery_zip && ` ${selectedLoad.delivery_zip}`}
+                  </p>
+                </div>
+                <div>
+                  <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
+                    <strong>Pickup Date:</strong>
+                  </p>
+                  <p style={{ fontSize: '14px', color: '#333' }}>
+                    {selectedLoad.pickup_date ? 
+                      (typeof selectedLoad.pickup_date === 'string' && selectedLoad.pickup_date.includes('T') 
+                        ? new Date(selectedLoad.pickup_date).toLocaleDateString()
+                        : selectedLoad.pickup_date) 
+                      : 'TBD'}
+                  </p>
+                </div>
+                <div>
+                  <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
+                    <strong>Delivery Date:</strong>
+                  </p>
+                  <p style={{ fontSize: '14px', color: '#333' }}>
+                    {selectedLoad.delivery_date ? 
+                      (typeof selectedLoad.delivery_date === 'string' && selectedLoad.delivery_date.includes('T') 
+                        ? new Date(selectedLoad.delivery_date).toLocaleDateString()
+                        : selectedLoad.delivery_date) 
+                      : 'TBD'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Additional Stops */}
+            {(selectedLoad.additional_stops && selectedLoad.additional_stops.length > 0) || 
+             (selectedLoad.additional_routes && selectedLoad.additional_routes.length > 0) ? (
+              <div style={{ marginBottom: '25px' }}>
+                <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#555', marginBottom: '15px' }}>
+                  Additional Stops & Pickup Points
+                </h3>
+                {(selectedLoad.additional_stops || selectedLoad.additional_routes || []).map((stop, index) => (
+                  <div key={index} style={{ marginBottom: '10px', padding: '12px', backgroundColor: '#f9f9f9', borderRadius: '6px', borderLeft: '3px solid #3b82f6' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '5px' }}>
+                      <p style={{ fontSize: '14px', color: '#333', fontWeight: '600', margin: 0 }}>
+                        {stop.type === 'pickup' ? '📦 Pickup' : stop.type === 'delivery' ? '🚚 Delivery' : '📍 Stop'} {index + 1}
+                      </p>
+                      {stop.date && (
+                        <p style={{ fontSize: '12px', color: '#666', margin: 0 }}>
+                          {typeof stop.date === 'string' && stop.date.includes('T') 
+                            ? new Date(stop.date).toLocaleDateString()
+                            : stop.date}
+                        </p>
+                      )}
+                    </div>
+                    <p style={{ fontSize: '14px', color: '#333', margin: 0 }}>
+                      {stop.location || stop.city || stop.address || 'N/A'}
+                      {stop.city && stop.state && `, ${stop.state}`}
+                      {stop.zip && ` ${stop.zip}`}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {/* Equipment and Load Details */}
+            <div style={{ marginBottom: '25px' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#555', marginBottom: '15px' }}>
+                Equipment & Load Details
+              </h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                <div>
+                  <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
+                    <strong>Equipment Type:</strong>
+                  </p>
+                  <p style={{ fontSize: '14px', color: '#333' }}>{selectedLoad.equipment_type}</p>
+                </div>
+                <div>
+                  <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
+                    <strong>Load Type:</strong>
+                  </p>
+                  <p style={{ fontSize: '14px', color: '#333' }}>{selectedLoad.load_type || 'Full'}</p>
+                </div>
+                <div>
+                  <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
+                    <strong>Weight:</strong>
+                  </p>
+                  <p style={{ fontSize: '14px', color: '#333' }}>
+                    {selectedLoad.weight ? `${selectedLoad.weight} lbs` : 'N/A'}
+                  </p>
+                </div>
+                <div>
+                  <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
+                    <strong>Total Distance:</strong>
+                  </p>
+                  <p style={{ fontSize: '14px', color: '#333', fontWeight: '600' }}>
+                    {selectedLoad.total_distance ? `${selectedLoad.total_distance} miles` : 
+                     selectedLoad.distance ? `${selectedLoad.distance}${typeof selectedLoad.distance === 'number' ? ' miles' : ''}` : 
+                     selectedLoad.estimated_distance ? `${selectedLoad.estimated_distance} miles` : 'N/A'}
+                  </p>
+                </div>
+                <div>
+                  <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
+                    <strong>Total Price Offered:</strong>
+                  </p>
+                  <p style={{ fontSize: '14px', color: '#333', fontWeight: '600', color: '#059669' }}>
+                    {selectedLoad.total_price ? `$${selectedLoad.total_price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 
+                     selectedLoad.rate ? `$${typeof selectedLoad.rate === 'string' ? selectedLoad.rate.replace('$', '').replace(',', '') : selectedLoad.rate}` : 
+                     selectedLoad.linehaul_rate ? `$${selectedLoad.linehaul_rate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Negotiable'}
+                  </p>
+                </div>
+                <div>
+                  <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
+                    <strong>Status:</strong>
+                  </p>
+                  <p style={{ fontSize: '14px', color: '#333' }}>{selectedLoad.status}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Shipper Information */}
+            {(selectedLoad.shipper_info || selectedLoad.shipper_company_name || selectedLoad.shipper_compliance_score !== undefined) && (
+              <div style={{ marginBottom: '25px' }}>
+                <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#555', marginBottom: '15px' }}>
+                  Shipper Information
+                </h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                  <div>
+                    <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
+                      <strong>Company Name:</strong>
+                    </p>
+                    <p style={{ fontSize: '14px', color: '#333', fontWeight: '600' }}>
+                      {selectedLoad.shipper_company_name || selectedLoad.shipper_info?.company_name || 'N/A'}
+                    </p>
+                  </div>
+                  <div>
+                    <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
+                      <strong>Compliance Score:</strong>
+                    </p>
+                    <p style={{ 
+                      fontSize: '14px', 
+                      color: selectedLoad.shipper_compliance_score >= 80 ? '#059669' : 
+                             selectedLoad.shipper_compliance_score >= 60 ? '#d97706' : '#dc2626',
+                      fontWeight: '600'
+                    }}>
+                      {selectedLoad.shipper_compliance_score !== undefined ? `${selectedLoad.shipper_compliance_score}%` : 'N/A'}
+                    </p>
+                  </div>
+                  {selectedLoad.shipper_info?.contact_name && (
+                    <div>
+                      <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
+                        <strong>Contact Name:</strong>
+                      </p>
+                      <p style={{ fontSize: '14px', color: '#333' }}>
+                        {selectedLoad.shipper_info.contact_name}
+                      </p>
+                    </div>
+                  )}
+                  {selectedLoad.shipper_info?.email && (
+                    <div>
+                      <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
+                        <strong>Email:</strong>
+                      </p>
+                      <p style={{ fontSize: '14px', color: '#333' }}>{selectedLoad.shipper_info.email}</p>
+                    </div>
+                  )}
+                  {selectedLoad.shipper_info?.phone && (
+                    <div>
+                      <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
+                        <strong>Phone:</strong>
+                      </p>
+                      <p style={{ fontSize: '14px', color: '#333' }}>{selectedLoad.shipper_info.phone}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Special Instructions */}
+            {selectedLoad.special_instructions && (
+              <div style={{ marginBottom: '25px' }}>
+                <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#555', marginBottom: '15px' }}>
+                  Special Instructions
+                </h3>
+                <p style={{ fontSize: '14px', color: '#333', lineHeight: '1.6' }}>
+                  {selectedLoad.special_instructions}
+                </p>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => {
+                  setDetailsModalOpen(false)
+                  handleOpenBidModal(selectedLoad)
+                }}
+                style={{
+                  padding: '12px 24px',
+                  backgroundColor: '#2563eb',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: 'pointer'
+                }}
+              >
+                Place Bid
+              </button>
+              <button
+                onClick={() => setDetailsModalOpen(false)}
+                style={{
+                  padding: '12px 24px',
+                  backgroundColor: '#e5e7eb',
+                  color: '#374151',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: 'pointer'
+                }}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

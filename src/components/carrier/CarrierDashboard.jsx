@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 import { API_URL } from '../../config';
 import '../../styles/carrier/CarrierDashboard.css';
 import peopleIcon from '../../assets/ai_driver.svg';
@@ -25,7 +26,8 @@ import resp_logo from '/src/assets/logo_1.png';
 // icon images replaced by Font Awesome icons
 
 export default function CarrierDashboard() {
-  const { currentUser } = useAuth();
+  const { currentUser, logout } = useAuth();
+  const navigate = useNavigate();
   // Placeholder data to match the design in the attached mock
   const activeLoads = { inProgress: 8, delivered: 24, completed: 156 };
   const driversCompliance = { active: 12, expiring: 4, alerts: 1 };
@@ -136,10 +138,31 @@ export default function CarrierDashboard() {
       title: 'SYSTEM',
       items: [
         { key: 'settings', label: 'Settings', icon: 'fa-solid fa-gear' },
-        { key: 'help', label: 'Help Hub', icon: 'fa-regular fa-circle-question' }
+        { key: 'help', label: 'Help Hub', icon: 'fa-regular fa-circle-question' },
+        { key: 'logout', label: 'Logout', icon: 'fa-solid fa-right-from-bracket' }
       ]
     }
   ];
+
+  // Handle logout
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate('/login');
+    } catch (error) {
+      console.error('Error logging out:', error);
+    }
+  };
+
+  // Handle navigation click
+  const handleNavClick = (key) => {
+    if (key === 'logout') {
+      handleLogout();
+    } else {
+      setActiveNav(key);
+      if (isSidebarOpen) setIsSidebarOpen(false);
+    }
+  };
 
   // Small router for the inner content area so the sidebar & topbar remain mounted
   function HomeView() {
@@ -606,11 +629,15 @@ export default function CarrierDashboard() {
                     className={`nav-item ${activeNav === it.key ? 'active' : ''}`}
                     key={it.key}
                     onClick={() => { 
-                      setActiveNav(it.key);
-                      if (it.key === 'marketplace') {
-                        setActiveMarketplaceSection('loads');
+                      if (it.key === 'logout') {
+                        handleLogout();
+                      } else {
+                        setActiveNav(it.key);
+                        if (it.key === 'marketplace') {
+                          setActiveMarketplaceSection('loads');
+                        }
+                        if (isSidebarOpen) setIsSidebarOpen(false);
                       }
-                      if (isSidebarOpen) setIsSidebarOpen(false); 
                     }}
                     role="button"
                     tabIndex={0}

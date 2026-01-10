@@ -8,7 +8,7 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
-set VIRTUAL_ENV=C:\Users\ATECH\Desktop\frightpower\frightpower\apps\venv
+set VIRTUAL_ENV=C:\freight-power\frightpowernew\apps\venv
 
 if not defined PROMPT set PROMPT=$P$G
 

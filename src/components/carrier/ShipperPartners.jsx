@@ -1,4 +1,6 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
+import { useAuth } from '../../contexts/AuthContext'
+import { API_URL } from '../../config'
 import '../../styles/carrier/ShipperPartners.css'
 // Use public placeholder user avatars instead of onboarding images
 const avatarUrls = [
@@ -12,19 +14,182 @@ const avatarUrls = [
   'https://i.pravatar.cc/80?img=8'
 ]
 
+// Mock partners data (fallback)
+const mockPartners = [
+  { id:1, name:'Swift Logistics', mc:'Broker', contactName:'Sarah Johnson', contactEmail:'sarah@swift.com', phone:'(555) 123-4567', loads:47, avgPay:'2 Days', dispute:'2.1%', status:'Partnered', favorite:true, rating:4.8, onTime:'97%', lastLoad:'3 days ago', location:'Dallas, TX' },
+  { id:2, name:'Global Freight Co.', mc:'Shipper', contactName:'Mike Rodriguez', contactEmail:'mike@global.com', phone:'(555) 987-6543', loads:23, avgPay:'1 Day', dispute:'0.8%', status:'Partnered', favorite:true, rating:5.0, onTime:'99%', lastLoad:'1 day ago', location:'Los Angeles, CA' },
+  { id:3, name:'Prime Transport', mc:'Broker', contactName:'Lisa Chen', contactEmail:'lisa@prime.com', phone:'(555) 456-7890', loads:8, avgPay:'5 Days', dispute:'5.2%', status:'Pending', favorite:true, rating:4.2, onTime:'94%', lastLoad:'1 week ago', location:'Atlanta, GA' }
+]
+
 export default function ShipperPartners(){
+  const { currentUser } = useAuth();
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [activeTab, setActiveTab] = useState('all') // all | favorites | invites | history
+  const [partners, setPartners] = useState([])
+  const [invites, setInvites] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [loadingInvites, setLoadingInvites] = useState(true)
 
-  const partners = [
-    { id:1, name:'Swift Logistics', mc:'Broker', contactName:'Sarah Johnson', contactEmail:'sarah@swift.com', phone:'(555) 123-4567', loads:47, avgPay:'2 Days', dispute:'2.1%', status:'Partnered', favorite:true, rating:4.8, onTime:'97%', lastLoad:'3 days ago', location:'Dallas, TX' },
-    { id:2, name:'Global Freight Co.', mc:'Shipper', contactName:'Mike Rodriguez', contactEmail:'mike@global.com', phone:'(555) 987-6543', loads:23, avgPay:'1 Day', dispute:'0.8%', status:'Partnered', favorite:true, rating:5.0, onTime:'99%', lastLoad:'1 day ago', location:'Los Angeles, CA' },
-    { id:3, name:'Prime Transport', mc:'Broker', contactName:'Lisa Chen', contactEmail:'lisa@prime.com', phone:'(555) 456-7890', loads:8, avgPay:'5 Days', dispute:'5.2%', status:'Pending', favorite:true, rating:4.2, onTime:'94%', lastLoad:'1 week ago', location:'Atlanta, GA' }
-  ]
+  // Fetch partners (accepted relationships)
+  useEffect(() => {
+    if (currentUser && activeTab === 'all') {
+      fetchPartners();
+    }
+  }, [currentUser, activeTab]);
 
-  // Mock invites dataset for the Invites & Requests tab (demo-only)
-  const invites = [
+  // Fetch invitations
+  useEffect(() => {
+    if (currentUser && activeTab === 'invites') {
+      fetchInvitations();
+    }
+  }, [currentUser, activeTab]);
+
+  const fetchPartners = async () => {
+    if (!currentUser) return;
+    setLoading(true);
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(`${API_URL}/shippers/my-shippers`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const formattedPartners = (data.shippers || []).map(rel => ({
+          id: rel.shipper_id,
+          name: rel.shipper_name || rel.shipper_company || 'Unknown Shipper',
+          mc: 'Shipper',
+          contactName: rel.shipper_name || 'N/A',
+          contactEmail: rel.shipper_email,
+          phone: rel.shipper_phone || '(555) 000-0000',
+          loads: 0,
+          avgPay: 'N/A',
+          dispute: '0%',
+          status: rel.status || 'Partnered',
+          favorite: false,
+          rating: 4.5,
+          onTime: '95%',
+          lastLoad: 'N/A',
+          location: 'N/A'
+        }));
+        setPartners(formattedPartners);
+      }
+    } catch (error) {
+      console.error('Error fetching partners:', error);
+      // Keep mock data as fallback
+      setPartners(mockPartners);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchInvitations = async () => {
+    if (!currentUser) return;
+    setLoadingInvites(true);
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(`${API_URL}/carriers/invitations?status=pending`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const formattedInvites = (data.invitations || []).map(inv => ({
+          id: inv.id,
+          name: inv.shipper_name || 'Unknown Shipper',
+          dot: 'N/A',
+          mc: 'Shipper',
+          email: inv.shipper_email,
+          phone: '(555) 000-0000',
+          rating: 4.5,
+          badge: 'Pending',
+          message: inv.message || `${inv.shipper_name || 'A shipper'} has invited you to join their carrier network.`,
+          received: inv.created_at ? formatRelativeTime(inv.created_at) : 'Recently',
+          expires: '7 days',
+          invitationId: inv.id,
+          shipperId: inv.shipper_id
+        }));
+        setInvites(formattedInvites);
+      }
+    } catch (error) {
+      console.error('Error fetching invitations:', error);
+    } finally {
+      setLoadingInvites(false);
+    }
+  };
+
+  const formatRelativeTime = (timestamp) => {
+    if (!timestamp) return 'Recently';
+    const now = Math.floor(Date.now() / 1000);
+    const diff = now - timestamp;
+    if (diff < 3600) return `${Math.floor(diff / 60)} minutes ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} hours ago`;
+    return `${Math.floor(diff / 86400)} days ago`;
+  };
+
+  const handleAcceptInvite = async (invitationId) => {
+    if (!currentUser) return;
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(`${API_URL}/carriers/invitations/${invitationId}/accept`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        alert('Invitation accepted! The shipper has been added to your partners list.');
+        // Refresh invitations and partners
+        fetchInvitations();
+        fetchPartners();
+      } else {
+        const error = await response.json();
+        alert(error.detail || 'Failed to accept invitation');
+      }
+    } catch (error) {
+      console.error('Error accepting invitation:', error);
+      alert('Failed to accept invitation. Please try again.');
+    }
+  };
+
+  const handleDeclineInvite = async (invitationId) => {
+    if (!currentUser) return;
+    if (!confirm('Are you sure you want to decline this invitation?')) return;
+
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(`${API_URL}/carriers/invitations/${invitationId}/decline`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        alert('Invitation declined.');
+        fetchInvitations();
+      } else {
+        const error = await response.json();
+        alert(error.detail || 'Failed to decline invitation');
+      }
+    } catch (error) {
+      console.error('Error declining invitation:', error);
+      alert('Failed to decline invitation. Please try again.');
+    }
+  };
+
+  // Mock invites dataset for fallback (demo-only)
+  const mockInvites = [
     { id: 201, name: 'Swift Logistics Corp', dot: '2847291', mc: '928374', email: 'contact@swiftlogistics.com', phone: '(555) 123-4567', rating: 4.2, badge: 'Compliant', message: "We're looking for reliable carriers for our Northeast routes. Your safety record and on-time performance make you an ideal partner for our operations.", received: '2 hours ago', expires: '5 days' },
     { id: 202, name: 'Global Freight Solutions', dot: '1847392', mc: '728364', email: 'partnerships@globalfreight.com', phone: '(555) 987-6543', rating: 4.8, badge: 'Under Review', message: 'Expanding our carrier network for cross-country shipments. Your fleet capacity and excellent track record align perfectly with our requirements.', received: '1 day ago', expires: '4 days' },
     { id: 203, name: 'Express Cargo Network', dot: '3847201', mc: '628374', email: 'carriers@expresscargo.net', phone: '(555) 456-7890', rating: 4.5, badge: 'Compliant', message: 'Time-sensitive shipments require dependable partners. Your punctuality and service quality make you a perfect fit for our express delivery network.', received: '3 days ago', expires: '2 days' }
@@ -46,9 +211,19 @@ export default function ShipperPartners(){
     { id: 406, title: 'W-9 Tax Form', type: 'tax', status: 'Valid', uploaded: '3 weeks ago', by: 'John Wilson (FreightPower AI)', size: '890 KB', icon: 'fa-file-alt' }
   ]
 
-  const [localPartners, setLocalPartners] = useState(partners)
+  const [localPartners, setLocalPartners] = useState([])
   const [openMenuId, setOpenMenuId] = useState(null)
   const [inviteTab, setInviteTab] = useState('incoming') // incoming | requests
+
+  // Update localPartners when partners change
+  useEffect(() => {
+    if (partners.length > 0) {
+      setLocalPartners(partners);
+    } else if (!loading) {
+      // Only use mock data if we're not loading and have no real data
+      setLocalPartners(mockPartners);
+    }
+  }, [partners, loading]);
 
   const filtered = localPartners.filter(p => {
     // tab-level filtering
@@ -333,7 +508,13 @@ export default function ShipperPartners(){
             </div>
           </div>
 
-          {(inviteTab === 'incoming' ? invites : requests).map(inv => (
+          {loadingInvites ? (
+            <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
+              <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '24px', marginBottom: '8px' }}></i>
+              <p>Loading invitations...</p>
+            </div>
+          ) : (
+            (inviteTab === 'incoming' ? (invites.length > 0 ? invites : mockInvites) : requests).map(inv => (
             <div className="invite-card card" key={inv.id} data-type={inviteTab === 'incoming' ? 'incoming' : 'request'}>
               <div className="invite-row" style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12}}>
                 <div style={{display:'flex',alignItems:'center',gap:12}}>
@@ -361,8 +542,19 @@ export default function ShipperPartners(){
                     {inviteTab === 'incoming' ? (
                       <>
                         <button className="btn small ghost-cd">View Profile</button>
-                        <button className="btn small ghost-cd"style={{color: '#c51313ff'}}>Decline</button>
-                        <button className="btn small-cd">Accept</button>
+                        <button 
+                          className="btn small ghost-cd" 
+                          style={{color: '#c51313ff'}}
+                          onClick={() => handleDeclineInvite(inv.invitationId)}
+                        >
+                          Decline
+                        </button>
+                        <button 
+                          className="btn small-cd"
+                          onClick={() => handleAcceptInvite(inv.invitationId)}
+                        >
+                          Accept
+                        </button>
                       </>
                     ) : (
                       <>
@@ -386,8 +578,19 @@ export default function ShipperPartners(){
                     {inviteTab === 'incoming' ? (
                       <>
                         <button className="btn small ghost-cd">View Profile</button>
-                        <button className="btn small ghost-cd" style={{borderColor:'#fdecea',color:'#ef4444'}}>Decline</button>
-                        <button className="btn small ghost-cd">Accept</button>
+                        <button 
+                          className="btn small ghost-cd" 
+                          style={{borderColor:'#fdecea',color:'#ef4444'}}
+                          onClick={() => handleDeclineInvite(inv.invitationId)}
+                        >
+                          Decline
+                        </button>
+                        <button 
+                          className="btn small ghost-cd"
+                          onClick={() => handleAcceptInvite(inv.invitationId)}
+                        >
+                          Accept
+                        </button>
                       </>
                     ) : (
                       <>
@@ -413,8 +616,20 @@ export default function ShipperPartners(){
                 {inviteTab === 'incoming' ? (
                   <>
                     <button className="btn small ghost-cd" style={{flex:1,marginRight:8}}>View Profile</button>
-                    <button className="btn small ghost-cd" style={{flex:1,marginRight:8,color: '#c51313ff'}}>Decline</button>
-                    <button className="btn small-cd" style={{flex:1}}>Accept</button>
+                    <button 
+                      className="btn small ghost-cd" 
+                      style={{flex:1,marginRight:8,color: '#c51313ff'}}
+                      onClick={() => handleDeclineInvite(inv.invitationId)}
+                    >
+                      Decline
+                    </button>
+                    <button 
+                      className="btn small-cd" 
+                      style={{flex:1}}
+                      onClick={() => handleAcceptInvite(inv.invitationId)}
+                    >
+                      Accept
+                    </button>
                   </>
                 ) : (
                   <>
@@ -425,7 +640,8 @@ export default function ShipperPartners(){
                 )}
               </div>
             </div>
-          ))}
+            ))
+          )}
 
           {/* Invites stats summary cards (end of invites screen) */}
           <div className="invites-stats">
